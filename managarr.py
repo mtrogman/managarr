@@ -4,7 +4,6 @@ from discord import app_commands
 from discord.ext import commands
 from discord.ui import Select, View, Button
 
-
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
 logging.basicConfig(stream=sys.stdout, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -141,9 +140,9 @@ class ConfirmButtonsPayment(View):
 
             if status == "Inactive":
                 updateDatabase(id, "status", "Active")
-                
-                ### NEED TO REENABLE PLEX AND DISCORD ### 
-                
+
+                ### NEED TO REENABLE PLEX AND DISCORD ###
+
             updateDatabase(id, "paidAmount", newPaidAmount)
             updateDatabase(id, "startDate", newStartDate)
             updateDatabase(id, "endDate", newEndDate)
@@ -160,8 +159,6 @@ class ConfirmButtonsPayment(View):
             )
 
         await self.interaction.followup.send(content=f"{followup_message}", ephemeral=True)
-
-
 
     async def cancel_callback(self, button):
         await self.interaction.delete_original_response()
@@ -255,7 +252,8 @@ class UpdateSelector(Select):
             confirmation_message = ""
 
             for user in self.information['users']:
-                paymentAmount = user['prices'][f'{termLength}Month']
+                paymentAmount = user['prices'].get(f'{termLength}Month', user['prices'].get('1Month', 0)) * termLength
+
                 user['newPaidAmount'] = float(user['paidAmount']) + paymentAmount + eachExtraBalance
 
                 if user['status'] == 'Active':
