@@ -1,4 +1,5 @@
 import sys, re, yaml, mysql.connector, logging, discord, math
+from datetime import datetime, timedelta
 from discord import app_commands
 from discord.ext import commands
 from discord.ui import Select, View, Button
@@ -35,6 +36,29 @@ def createConnection():
     except mysql.connector.Error as e:
         logging.error(f"Error connecting to the database: {e}")
         return None
+
+
+def updateDatabase(user_id, field, value):
+    try:
+        connection = createConnection()
+        if connection:
+            cursor = connection.cursor()
+
+            # SQL query to update the specified field for the given user ID
+            update_query = f"UPDATE users SET {field} = %s WHERE id = %s"
+            cursor.execute(update_query, (value, user_id))
+
+            # Commit the changes
+            connection.commit()
+            logging.info(f"Updated {field} for user ID {user_id} to {value}")
+
+    except mysql.connector.Error as e:
+        logging.error(f"Error updating database: {e}")
+
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
 
 
 def findUser(search_term):
@@ -86,12 +110,69 @@ def findUser(search_term):
 
     return matching_rows_list
 
+
+class ConfirmButtonsPayment(View):
+    def __init__(self, interaction, information):
+        super().__init__()
+        correct_button = Button(style=discord.ButtonStyle.primary, label="Correct")
+        correct_button.callback = self.correct_callback
+        self.add_item(correct_button)
+
+        cancel_button = Button(style=discord.ButtonStyle.danger, label="Cancel")
+        cancel_button.callback = self.cancel_callback
+        self.add_item(cancel_button)
+
+        self.interaction = interaction
+        self.information = information
+
+    async def correct_callback(self, button):
+        # Use self.information to access user details
+        await self.interaction.delete_original_response()
+
+        followup_message = ""
+
+        for user in self.information['users']:
+            id = user.get('id')
+            discord = user.get('primaryDiscord')
+            status = user.get('status')
+            newPaidAmount = user.get('newPaidAmount')
+            newStartDate = user.get('newStartDate')
+            newEndDate = user.get('newEndDate')
+
+            if status == "Inactive":
+                updateDatabase(id, "status", "Active")
+                
+                ### NEED TO REENABLE PLEX AND DISCORD ### 
+                
+            updateDatabase(id, "paidAmount", newPaidAmount)
+            updateDatabase(id, "startDate", newStartDate)
+            updateDatabase(id, "endDate", newEndDate)
+
+            followup_message += (
+                "---------------------\n"
+                f"Primary Email: {user.get('primaryEmail')}\n"
+                f"Server: {user.get('server')}\n"
+                f"4k: {user.get('4k')}\n"
+                f"Start Date: {user.get('newStartDate')}\n"
+                f"End Date: {user.get('newEndDate')}\n"
+                f"Status: {user.get('status')}\n"
+                f"Paid Amount: {user.get('newPaidAmount')}\n"
+            )
+
+        await self.interaction.followup.send(content=f"{followup_message}", ephemeral=True)
+
+
+
+    async def cancel_callback(self, button):
+        await self.interaction.delete_original_response()
+        await self.interaction.followup.send(content="Cancelled the request.", ephemeral=True)
+
+
 # View & Select required to build out Discord Dropdown.
 class UpdateSelectorView(View):
     def __init__(self, searchResults, information):
         super().__init__()
         self.add_item(UpdateSelector(searchResults, information))
-
 
 
 class UpdateSelector(Select):
@@ -153,9 +234,10 @@ class UpdateSelector(Select):
             eachExtraBalance = 0
 
             if matching_lengths:
-                # There is at least one matching term length
                 subscription_length_str = matching_lengths[0]
                 termLength = int(''.join(filter(str.isdigit, subscription_length_str)))
+                self.information['length'] = termLength
+                eachExtraBalance = 0
             else:
                 # The amount doesn't match any predefined values, try calculating based on 1Month value
                 one_month_price = total_prices['1Month']
@@ -163,29 +245,45 @@ class UpdateSelector(Select):
 
                 if calculated_months.is_integer():
                     termLength = int(calculated_months)
+                    eachExtraBalance = 0
                 else:
                     termLength = math.floor(calculated_months)
                     extraBalance = total_amount - (termLength * one_month_price)
                     eachExtraBalance = extraBalance / user_count
                     notRounded = False
 
-            print("#####################")
-            for user in selected_users:
-                expectedAmount = user['prices'][f'{termLength}Month']
-                paymentAmount = float(expectedAmount) + float(eachExtraBalance)
-                print(
-                    f"Primary Discord: {user.get('primaryDiscord')}\n"
+            confirmation_message = ""
+
+            for user in self.information['users']:
+                paymentAmount = user['prices'][f'{termLength}Month']
+                user['newPaidAmount'] = float(user['paidAmount']) + paymentAmount + eachExtraBalance
+
+                if user['status'] == 'Active':
+                    user['newStartDate'] = user['endDate']
+                    user['newEndDate'] = user['newStartDate'] + timedelta(days=30 * termLength)
+                else:
+                    today = datetime.today().date()
+                    user['newStartDate'] = today
+                    user['newEndDate'] = today + timedelta(days=30 * termLength)
+
+                confirmation_message += (
+                    "---------------------\n"
                     f"Primary Email: {user.get('primaryEmail')}\n"
                     f"Server: {user.get('server')}\n"
                     f"4k: {user.get('4k')}\n"
-                    f"Start Date: {user.get('startDate')}\n"
-                    f"End Date: {user.get('endDate')}\n"
+                    f"Old Start Date: {user.get('startDate')}\n"
+                    f"Old End Date: {user.get('endDate')}\n"
+                    f"Start Date: {user.get('newStartDate')}\n"
+                    f"End Date: {user.get('newEndDate')}\n"
                     f"Status: {user.get('status')}\n"
-                    f"Expected Amount: {expectedAmount}\n"
-                    f"Paid Amount: {paymentAmount}\n"
+                    f"Paid Amount: {user.get('newPaidAmount')}\n"
+                    f"Old Paid Amount: {user.get('paidAmount')}\n"
                     f"User Pay Correct Amount?: {notRounded}\n"
-                    "---------------------"
                 )
+
+            confirmation_view = ConfirmButtonsPayment(interaction, self.information)
+
+            await interaction.response.edit_message(content=confirmation_message, view=confirmation_view)
 
 
 # Sync commands with discord
