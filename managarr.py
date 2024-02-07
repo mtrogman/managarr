@@ -1,5 +1,7 @@
 import sys, re, yaml, mysql.connector, logging, discord, math
 from datetime import datetime, timedelta
+from plexapi.server import PlexServer
+from plexapi.myplex import MyPlexAccount
 from discord import app_commands
 from discord.ext import commands
 from discord.ui import Select, View, Button
@@ -110,6 +112,34 @@ def findUser(search_term):
     return matching_rows_list
 
 
+async def addRole(user_id, role_name):
+    guild_id = int(config['discord']['guildId'])
+
+    try:
+        guild = bot.get_guild(guild_id)
+
+        if guild:
+            user = await guild.fetch_member(user_id)
+
+            if user:
+                role = discord.utils.get(guild.roles, name=role_name)
+
+                if role:
+                    await user.add_roles(role)
+                    logging.info(f"Added role {role_name} to user {user.name} ({user.id})")
+                else:
+                    logging.error(f"Role {role_name} not found")
+            else:
+                logging.error(f"Member {user_id} not found in the guild")
+        else:
+            logging.error(f"Guild {guild_id} not found")
+
+    except discord.Forbidden:
+        logging.error(f"Bot doesn't have permission to add roles")
+    except discord.HTTPException as e:
+        logging.error(f"Error adding role: {e}")
+
+
 class ConfirmButtonsPayment(View):
     def __init__(self, interaction, information):
         super().__init__()
@@ -132,24 +162,61 @@ class ConfirmButtonsPayment(View):
 
         for user in self.information['users']:
             id = user.get('id')
-            discord = user.get('primaryDiscord')
             status = user.get('status')
             newPaidAmount = user.get('newPaidAmount')
             newStartDate = user.get('newStartDate')
             newEndDate = user.get('newEndDate')
+            userEmail = user.get('primaryEmail')
 
+            # Extract relevant information from the user object
+            server = user.get('server')
+            discordUser = user.get('primaryDiscord')
+            discordUserId = user.get('primaryDiscordId')
+            discordRole = config.get(f"PLEX-{server}", {}).get('role')
+            standardLibraries = config.get(f"PLEX-{server}", {}).get('standardLibraries')
+            optionalLibraries = config.get(f"PLEX-{server}", {}).get('optionalLibraries')
+            section_names = standardLibraries + optionalLibraries if user.get('4k') == "Yes" else standardLibraries
+
+            # Add user to paid role
+            await addRole(discordUserId, discordRole)
+
+            # Retrieve configuration for the Plex server
+            plexConfig = config.get(f'PLEX-{server}', None)
+            if not isinstance(plexConfig, dict):
+                logging.error(f"No configuration found for Plex server '{server}'")
+                return
+
+            baseUrl = plexConfig.get('baseUrl', None)
+            token = plexConfig.get('token', None)
             if status == "Inactive":
-                updateDatabase(id, "status", "Active")
+                if not baseUrl or not token:
+                    logging.error(f"Invalid configuration for Plex server '{server}'")
+                    return
+                # Authenticate to Plex
+                try:
+                    plex = PlexServer(baseUrl, token)
+                except Exception as e:
+                    logging.error(f"Error authenticating to {baseUrl}")
+                    logging.exception(e)
 
-                ### NEED TO REENABLE PLEX AND DISCORD ###
+                # Invite user back to Plex
+                try:
+                    addUser = plex.myPlexAccount().inviteFriend(user=userEmail, server=plex, sections=section_names, allowSync=True)
+                    if addUser:
+                        logging.info(f"User '{userEmail}' has been successfully removed from Plex server '{server}'")
+                except Exception as e:
+                    logging.error(f"Error inviting user {userEmail} to {server} with the following libraries: {section_names}")
+                    logging.exception(e)
 
             updateDatabase(id, "paidAmount", newPaidAmount)
             updateDatabase(id, "startDate", newStartDate)
             updateDatabase(id, "endDate", newEndDate)
+            updateDatabase(id, "status", "Active")
 
             followup_message += (
                 "---------------------\n"
-                f"Primary Email: {user.get('primaryEmail')}\n"
+                f"Discord: {discordUser}\n"
+                f"Email: {userEmail}\n"
                 f"Server: {user.get('server')}\n"
                 f"4k: {user.get('4k')}\n"
                 f"Start Date: {user.get('newStartDate')}\n"
@@ -157,6 +224,7 @@ class ConfirmButtonsPayment(View):
                 f"Status: {user.get('status')}\n"
                 f"Paid Amount: {user.get('newPaidAmount')}\n"
             )
+
 
         await self.interaction.followup.send(content=f"{followup_message}", ephemeral=True)
 
