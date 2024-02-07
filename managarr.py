@@ -2,7 +2,10 @@ import sys, re, yaml, mysql.connector, logging, discord, math
 from datetime import datetime, timedelta
 from plexapi.server import PlexServer
 from plexapi.myplex import MyPlexAccount
-from discord import app_commands
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+import smtplib
+from discord import app_commands, Embed
 from discord.ext import commands
 from discord.ui import Select, View, Button
 
@@ -140,6 +143,48 @@ async def addRole(user_id, role_name):
         logging.error(f"Error adding role: {e}")
 
 
+async def sendDiscordMessage(toUser, subject, body):
+    user = await bot.fetch_user(toUser)
+    embed = Embed(title=f"**{subject}**", description=body, color=discord.Colour.blue())
+    try:
+        await user.send(embed=embed)
+    except discord.errors.Forbidden as e:
+        logging.warning(f"Failed to send message to {user.name}#{user.discriminator}: {e}")
+    except Exception as e:
+        logging.error(f"An unexpected error occurred for {user.name}: {e}")
+
+
+def sendEmail(config_location, subject, body, toEmails):
+    # Retrieve the email configuration from the config file
+    config = getConfig(config_location)
+    emailConfig = config.get('email', {})
+
+    # Extract email configuration values
+    smtpServer = emailConfig.get('smtpServer', '')
+    smtpPort = emailConfig.get('smtpPort', 587)
+    smtpUsername = emailConfig.get('smtpUsername', '')
+    smtpPassword = emailConfig.get('smtpPassword', '')
+
+    # Check if any required values are missing
+    if not smtpServer or not smtpUsername or not smtpPassword:
+        raise ValueError("Email configuration is incomplete. Please check your config file.")
+
+    # Create the email message
+    msg = MIMEMultipart()
+    msg['From'] = smtpUsername
+    msg['To'] = toEmails
+    msg['Subject'] = subject
+
+    # Attach the body of the email
+    msg.attach(MIMEText(body, 'plain'))
+
+    # Connect to the SMTP server and send the email
+    with smtplib.SMTP(smtpServer, smtpPort) as server:
+        server.starttls()
+        server.login(smtpUsername, smtpPassword)
+        server.sendmail(smtpUsername, toEmails, msg.as_string())
+
+
 class ConfirmButtonsPayment(View):
     def __init__(self, interaction, information):
         super().__init__()
@@ -176,9 +221,11 @@ class ConfirmButtonsPayment(View):
             standardLibraries = config.get(f"PLEX-{server}", {}).get('standardLibraries')
             optionalLibraries = config.get(f"PLEX-{server}", {}).get('optionalLibraries')
             section_names = standardLibraries + optionalLibraries if user.get('4k') == "Yes" else standardLibraries
-
-            # Add user to paid role
-            await addRole(discordUserId, discordRole)
+            newEndDate = user.get('newEndDate')
+            subject = config.get(f"discord", {}).get('paymentSubject')
+            body = config.get(f"discord", {}).get('paymentBody')
+            # Perform string interpolation to substitute variables with values
+            body = body.format(primaryEmail=userEmail, server=server, section_names=section_names, newEndDate=newEndDate)
 
             # Retrieve configuration for the Plex server
             plexConfig = config.get(f'PLEX-{server}', None)
@@ -189,6 +236,9 @@ class ConfirmButtonsPayment(View):
             baseUrl = plexConfig.get('baseUrl', None)
             token = plexConfig.get('token', None)
             if status == "Inactive":
+                # Add user to paid role
+                await addRole(discordUserId, discordRole)
+
                 if not baseUrl or not token:
                     logging.error(f"Invalid configuration for Plex server '{server}'")
                     return
@@ -220,11 +270,15 @@ class ConfirmButtonsPayment(View):
                 f"Server: {user.get('server')}\n"
                 f"4k: {user.get('4k')}\n"
                 f"Start Date: {user.get('newStartDate')}\n"
-                f"End Date: {user.get('newEndDate')}\n"
+                f"End Date: {newEndDate}\n"
                 f"Status: {user.get('status')}\n"
                 f"Paid Amount: {user.get('newPaidAmount')}\n"
             )
 
+            # Send Discord Msg to user
+            await sendDiscordMessage(toUser=discordUserId, subject=subject, body=body)
+            # Send Email Msg to user
+            sendEmail(config_location, subject, body, userEmail)
 
         await self.interaction.followup.send(content=f"{followup_message}", ephemeral=True)
 
