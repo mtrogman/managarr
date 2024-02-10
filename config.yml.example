@@ -1,0 +1,40 @@
+discord:
+  token: PUT_DISCORD_BOT_TOKEN_HERE
+  guildId: PUT_YOUR_GUILD_ID_HERE
+  channelId: PUT_CHANNEL_WHERE_BOT_CAN_PRIVATELY_TALK_TO_YOU
+  paymentSubject: "<YOUR NAME>'s Plex Subscription Renewed"
+  paymentBody: "Dear User,\n\nYour subscription for email: {primaryEmail} has been extended on {server} with access to the following libraries: {section_names}.  Your new end date is: {newEndDate}.\n\n Enjoy!  If you have any questions or issues  please reply to this email or contac <YOUR NAME> on Discord (https://discord.gg/XXXXXXXX).\n\nBest regards,\n<YOUR NAME>"
+
+database:
+  database: media_mgmt
+  host: PUT_THE_IP_OR_HOSTNAME_OF_DATABASE-SERVER_HERE
+  password: XXXXXXXX
+  port: 3306
+  user: lsql_harassarr
+
+email:
+  smtpServer: smtp.gmail.com
+  smtpPport: 587
+  smtpUsername: your_email@gmail.com
+  smtpPassword: your_email_password
+ 
+PLEX-YYYYYYYYY:
+  serverName: YYYYYYYYY
+  baseUrl: https://XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX:32400
+  token: XXXXXXXX
+  role: PUT_DISCORD_ROLE_HERE
+  standardLibraries:
+  - Movies
+  - TV Shows
+  optionalLibraries:
+  - Movies 4k
+
+PLEX-XXXXXXXX:
+  serverName: XXXXXXXX
+  baseUrl: https://XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX:32400
+  token: XXXXXXXX
+  role: PUT_DISCORD_ROLE_HERE
+  standardLibraries:
+  - Movies
+  - TV Shows
+  optionalLibraries: []
