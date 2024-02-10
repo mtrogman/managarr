@@ -1,5 +1,6 @@
 import sys, re, yaml, mysql.connector, logging, discord, math
 from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 from plexapi.server import PlexServer
 from plexapi.myplex import MyPlexAccount
 from email.mime.multipart import MIMEMultipart
@@ -374,17 +375,19 @@ class UpdateSelector(Select):
             confirmation_message = ""
 
             for user in self.information['users']:
-                paymentAmount = user['prices'].get(f'{termLength}Month', user['prices'].get('1Month', 0)) * termLength
+                if f'{termLength}Month' in user['prices']:
+                    paymentAmount = user['prices'][f'{termLength}Month']
+                else:
+                    paymentAmount = user['prices'].get('1Month') * termLength
 
                 user['newPaidAmount'] = float(user['paidAmount']) + paymentAmount + eachExtraBalance
 
                 if user['status'] == 'Active':
                     user['newStartDate'] = user['endDate']
-                    user['newEndDate'] = user['newStartDate'] + timedelta(days=30 * termLength)
                 else:
                     today = datetime.today().date()
                     user['newStartDate'] = today
-                    user['newEndDate'] = today + timedelta(days=30 * termLength)
+                user['newEndDate'] = user['newStartDate'] + relativedelta(months=termLength)
 
                 confirmation_message += (
                     "---------------------\n"
