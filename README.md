@@ -17,6 +17,11 @@ A Discord bot to add/update users on plex and discord with subscription updates 
 
 managarr uses discord in conjunction with MariaDB, Plex, and Discord to manage users subscriptions.
 
+# Commands
+
+/payment_recieved [User] [Amount]
+    This cmd will use [User] and search for it in primaryDiscord, paymentPerson, primaryEmail and return all matches.  Once you select the user(s) it will calculate the amount based off the values in the config and [Amount].  It will calculate the new end date for the user and also increment the paidAmount of the user to match the amount recieved.  If the payment amount matches one of the dicount points (3/6/12 Months) it calculates the paid months by that number, if it doesnt match one of those values it defaults to 1 month and calculates payment off that price and extends users subscription by the amount of months that the payment covers.  If the payment doesnt cleanly add up the extra amount is also added to the users payment.
+
 # Installation and setup
 
 ## Requirements
