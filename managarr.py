@@ -43,6 +43,40 @@ def createConnection():
         return None
 
 
+def createUser(information):
+    try:
+        connection = createConnection()
+        if connection:
+            cursor = connection.cursor()
+
+        # Extract information from the input dictionary
+        primary_email = str(information.get('primaryEmail', ''))
+        primary_discord = str(information.get('primaryDiscord', ''))
+        primary_discord_id = str(information.get('primaryDiscordId', ''))
+        payment_method = str(information.get('paymentMethod', ''))
+        paid_amount = str(information.get('paidAmount', ''))
+        server = str(information.get('server', ''))
+        is_4k = str(information.get('4k', ''))
+        status = "Active"
+        joinDate = datetime.now().strftime('%Y-%m-%d')
+        startDate = joinDate
+
+        # SQL query to insert a new user into the database
+        insert_query = "INSERT INTO users (primaryEmail, primaryDiscord, primaryDiscordId, paymentMethod, paidAmount, server, 4k, status, joinDate, startDate) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+        cursor.execute(insert_query, (primary_email, primary_discord, primary_discord_id, payment_method, paid_amount, server, is_4k, status, joinDate, startDate))
+
+        # Commit the changes
+        connection.commit()
+        logging.info(f"Created new user with primary email: {primary_email}")
+    except mysql.connector.Error as e:
+        logging.error(f"Error creating user: {e}")
+
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
+
+
 def updateDatabase(user_id, field, value):
     try:
         connection = createConnection()
@@ -287,8 +321,154 @@ class ConfirmButtonsPayment(View):
         await self.interaction.delete_original_response()
         await self.interaction.followup.send(content="Cancelled the request.", ephemeral=True)
 
+class DiscordUserView(View):
+    def __init__(self, information, ctx, discorduser):
+        super().__init__()
+        self.add_item(DiscordUserSelector(information, ctx, discorduser))
 
-# View & Select required to build out Discord Dropdown.
+
+class DiscordUserSelector(Select):
+     def __init__(self, information, ctx, discorduser):
+        self.information = information
+        options = []
+        # Find Discord User
+        if discorduser.lower() != "none":
+            guild = ctx.guild
+            if not guild:
+                ctx.response.send_message("Command must be used in a guild/server.")
+                return
+
+            # Search for the member in the guild, checking both display name and username
+            member = discord.utils.find(lambda m: m.name.lower() == discorduser.lower() or m.display_name.lower() == discorduser.lower(), guild.members)
+
+            if not member:
+                ctx.response.send_message(f"User '{discorduser}' not found in the server.")
+                return
+            options.append(discord.SelectOption(label=member.name,value=member.id))
+        else:
+            options.append(discord.SelectOption(label="Not on Discord", value="N/A"))
+        options.append(discord.SelectOption(label="Cancel", value="cancel"))
+
+        super().__init__(placeholder="Please confirm Discord Username", options=options, min_values=1)
+
+     async def callback(self, interaction: discord.Interaction):
+         if self.values[0] == "cancel":
+             await interaction.response.edit_message(content="Cancelled the request", view=None)
+             return
+         if self.values[0] != "N/A":
+             selected_user_id = int(self.values[0])
+             selected_user = discord.utils.get(interaction.guild.members, id=selected_user_id)
+
+             if selected_user:
+                 self.information['primaryDiscord'] = selected_user.name
+                 self.information['primaryDiscordId'] = selected_user.id
+
+             else:
+                 await interaction.response.send_message("Failed to find selected user, please try again.", ephemeral=True)
+                 return
+         await interaction.response.edit_message(content="Select the payment method", view=PaymentMethodView(self.information))
+
+
+class PaymentMethodView(View):
+    def __init__(self, information):
+        super().__init__()
+        self.add_item(PaymentMethodSelector(information))
+
+
+class PaymentMethodSelector(Select):
+    def __init__(self, information):
+        self.information = information
+
+        config = getConfig(config_location)
+        payment_methods = config.get('PaymentMethod', [])
+
+        options = [
+            discord.SelectOption(
+                label=method,
+                value=method
+            )
+            for method in payment_methods
+        ]
+        options.append(discord.SelectOption(label="Cancel", value="cancel"))
+
+        super().__init__(placeholder="Please select the payment method", options=options, min_values=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.values[0] == "cancel":
+            await interaction.response.edit_message(content="Cancelled the request", view=None)
+            return
+        self.information['paymentMethod'] = self.values[0]
+        await interaction.response.edit_message(content="Select the Server", view=ServerView(self.information))
+
+
+class ServerView(View):
+    def __init__(self, information):
+        super().__init__()
+        self.add_item(ServerSelector(information))
+
+
+class ServerSelector(Select):
+    def __init__(self, information):
+        self.information = information
+
+        config = getConfig(config_location)
+        server_names = []
+
+        for key in config.keys():
+            if key.startswith('PLEX-'):
+                server_name = config[key].get('serverName', None)
+                if server_name:
+                    server_names.append(server_name)
+
+        options = [
+            discord.SelectOption(
+                label=server_name,
+                value=server_name
+            )
+            for server_name in server_names
+        ]
+        options.append(discord.SelectOption(label="Cancel", value="cancel"))
+
+        super().__init__(placeholder="Media Server", options=options, min_values=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.values[0] == "cancel":
+            await interaction.response.edit_message(content="Cancelled the request", view=None)
+            return
+        self.information['server'] = self.values[0]
+        await interaction.response.edit_message(content="Select the 4k", view=fourKView(self.information))
+
+
+class fourKView(View):
+    def __init__(self, information):
+        super().__init__()
+        self.add_item(fourKSelector(information))
+
+
+class fourKSelector(Select):
+    def __init__(self, information):
+        self.information = information
+
+
+
+
+        options = []
+        options.append(discord.SelectOption(label="Yes", value="Yes"))
+        options.append(discord.SelectOption(label="No", value="No"))
+        options.append(discord.SelectOption(label="Cancel", value="cancel"))
+
+        super().__init__(placeholder="4K?", options=options, min_values=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.values[0] == "cancel":
+            await interaction.response.edit_message(content="Cancelled the request", view=None)
+            return
+        self.information['4k'] = self.values[0]
+        print(self.information)
+        createUser(self.information)
+        await interaction.response.edit_message(content="User Added", view=None)
+
+
 class UpdateSelectorView(View):
     def __init__(self, searchResults, information):
         super().__init__()
@@ -422,7 +602,7 @@ async def on_ready():
 
 # Bot command to "receive payment"
 @bot.tree.command(name="payment_received", description="Update user's paid amount and extend end date")
-@app_commands.describe(user="User identifier (Discord user, email address, or paymentPerson)", amount="Payment amount (integer)")
+@app_commands.describe(user="User identifier (Discord user, email address, or paymentPerson)", amount="Payment amount (float)")
 async def payment_received(ctx, *, user: str, amount: float):
     # Use the findUser function to get closely matching users
     searchResults = findUser(user)
@@ -436,6 +616,17 @@ async def payment_received(ctx, *, user: str, amount: float):
     information['what'] = 'payment'
     information['paymentAmount'] = amount
     await ctx.response.send_message("Select the correct user", view=UpdateSelectorView(searchResults, information), ephemeral=True)
+
+
+
+@bot.tree.command(name="add_new_user", description="Add new user to DB")
+@app_commands.describe(discorduser="Discord Username; Put none or na if user not on Discord", email="User email address", amount="Payment amount (float)")
+async def add_new_user(ctx, *, discorduser: str = "none", email: str, amount: float):
+    information = {}
+    information['what'] = 'newuser'
+    information['primaryEmail'] = email
+    information['paidAmount'] = amount
+    await ctx.response.send_message("Confirm Discord User", view=DiscordUserView(information, ctx, discorduser), ephemeral=True)
 
 
 bot.run(bot_token)
