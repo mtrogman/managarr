@@ -20,7 +20,7 @@ def getConfig(file):
     return config
 
 
-config_location = "/config/config.yml"
+config_location = "./config/config.yml"
 config = getConfig(config_location)
 bot_token = config['discord']['token']
 
@@ -50,20 +50,22 @@ def createUser(information):
             cursor = connection.cursor()
 
         # Extract information from the input dictionary
-        primary_email = str(information.get('primaryEmail', ''))
-        primary_discord = str(information.get('primaryDiscord', ''))
-        primary_discord_id = str(information.get('primaryDiscordId', ''))
-        payment_method = str(information.get('paymentMethod', ''))
-        paid_amount = str(information.get('paidAmount', ''))
-        server = str(information.get('server', ''))
-        is_4k = str(information.get('4k', ''))
+        primary_email = information.get('primaryEmail', '')
+        primary_discord = information.get('primaryDiscord', '')
+        primary_discord_id = information.get('primaryDiscordId', '')
+        payment_method = information.get('paymentMethod', '')
+        paid_amount = information.get('paidAmount', '')
+        server = information.get('server', '')
+        is_4k = information.get('4k', '')
         status = "Active"
-        joinDate = datetime.now().strftime('%Y-%m-%d')
-        startDate = joinDate
+        startDate = information.get('startDate', '')
+        joinDate = startDate
+        endDate = information.get('endDate', '')
+
 
         # SQL query to insert a new user into the database
-        insert_query = "INSERT INTO users (primaryEmail, primaryDiscord, primaryDiscordId, paymentMethod, paidAmount, server, 4k, status, joinDate, startDate) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-        cursor.execute(insert_query, (primary_email, primary_discord, primary_discord_id, payment_method, paid_amount, server, is_4k, status, joinDate, startDate))
+        insert_query = "INSERT INTO users (primaryEmail, primaryDiscord, primaryDiscordId, paymentMethod, paidAmount, server, 4k, status, joinDate, startDate, endDate) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+        cursor.execute(insert_query, (primary_email, primary_discord, primary_discord_id, payment_method, paid_amount, server, is_4k, status, joinDate, startDate, endDate))
 
         # Commit the changes
         connection.commit()
@@ -220,6 +222,32 @@ def sendEmail(config_location, subject, body, toEmails):
         server.sendmail(smtpUsername, toEmails, msg.as_string())
 
 
+def calculate_term_length(server, amount, is_4k):
+    config = getConfig(config_location)
+    plex_config = config.get(f"PLEX-{server}", {})
+
+    # Get the pricing section based on the 4K status
+    pricing_section = plex_config.get('4k' if is_4k == 'Yes' else '1080p', {})
+
+    # Try to find a matching term length based on the amount
+    for term_length, price in pricing_section.items():
+        if price == amount:
+            return int(term_length.strip('Month'))
+
+    # If no exact match found, calculate based on 1 month price
+    one_month_price = pricing_section.get('1Month', 0)
+    if one_month_price == 0:
+        return 0  # No pricing information found
+
+    term_length = amount / one_month_price
+
+    # Check if the calculated term length is an integer or if it needs to be rounded down
+    if term_length.is_integer():
+        return int(term_length)
+    else:
+        return math.floor(term_length)
+
+
 class ConfirmButtonsPayment(View):
     def __init__(self, interaction, information):
         super().__init__()
@@ -321,9 +349,102 @@ class ConfirmButtonsPayment(View):
         await self.interaction.delete_original_response()
         await self.interaction.followup.send(content="Cancelled the request.", ephemeral=True)
 
+
+class ConfirmButtonsNewUser(View):
+    def __init__(self, interaction, information):
+        super().__init__()
+        correct_button = Button(style=discord.ButtonStyle.primary, label="Correct")
+        correct_button.callback = self.correct_callback
+        self.add_item(correct_button)
+
+        cancel_button = Button(style=discord.ButtonStyle.danger, label="Cancel")
+        cancel_button.callback = self.cancel_callback
+        self.add_item(cancel_button)
+
+        self.interaction = interaction
+        self.information = information
+
+    async def correct_callback(self, button):
+        # Use self.information to access user details
+        await self.interaction.delete_original_response()
+
+        followup_message = ""
+
+        # Extract relevant information from the user object
+        server = self.information.get('server')
+        email = self.information.get('email')
+        discordUser = self.information.get('primaryDiscord')
+        discordUserId = self.information.get('primaryDiscordId')
+        discordRole = config.get(f"PLEX-{server}", {}).get('role')
+        standardLibraries = config.get(f"PLEX-{server}", {}).get('standardLibraries')
+        optionalLibraries = config.get(f"PLEX-{server}", {}).get('optionalLibraries')
+        section_names = standardLibraries + optionalLibraries if self.information.get('4k') == "Yes" else standardLibraries
+        startDate = self.information.get('startDate')
+        endDate = self.information.get('endDate')
+        subject = config.get(f"discord", {}).get('paymentSubject')
+        body = config.get(f"discord", {}).get('paymentBody')
+        # Perform string interpolation to substitute variables with values
+        body = body.format(primaryEmail=email, server=server, section_names=section_names, endDate=endDate)
+
+        # Retrieve configuration for the Plex server
+        plexConfig = config.get(f'PLEX-{server}', None)
+        if not isinstance(plexConfig, dict):
+            logging.error(f"No configuration found for Plex server '{server}'")
+            return
+
+        baseUrl = plexConfig.get('baseUrl', None)
+        token = plexConfig.get('token', None)
+
+        await addRole(discordUserId, discordRole)
+
+        if not baseUrl or not token:
+            logging.error(f"Invalid configuration for Plex server '{server}'")
+            return
+        # Authenticate to Plex
+        try:
+            plex = PlexServer(baseUrl, token)
+        except Exception as e:
+            logging.error(f"Error authenticating to {baseUrl}")
+            logging.exception(e)
+
+        # Invite user to Plex
+        try:
+            addUser = plex.myPlexAccount().inviteFriend(user=email, server=plex, sections=section_names, allowSync=True)
+            if addUser:
+                logging.info(f"User '{email}' has been successfully removed from Plex server '{server}'")
+        except Exception as e:
+            logging.error(f"Error inviting user {email} to {server} with the following libraries: {section_names}")
+            logging.exception(e)
+
+        # Create user in DB
+        createUser(self.information)
+
+        followup_message += (
+            f"Discord: {discordUser}\n"
+            f"Email: {email}\n"
+            f"Server: {self.information.get('server')}\n"
+            f"4k: {self.information.get('4k')}\n"
+            f"Start Date: {startDate}\n"
+            f"End Date: {endDate}\n"
+            f"Status: {self.information.get('status')}\n"
+            f"Paid Amount: {self.information.get('newPaidAmount')}\n"
+        )
+
+        # Send Discord Msg to user
+        await sendDiscordMessage(toUser=discordUserId, subject=subject, body=body)
+        # Send Email Msg to user
+        sendEmail(config_location, subject, body, email)
+
+        await self.interaction.followup.send(content=f"{followup_message}", ephemeral=True)
+
+    async def cancel_callback(self, button):
+        await self.interaction.delete_original_response()
+        await self.interaction.followup.send(content="Cancelled the request.", ephemeral=True)
+
+
 class DiscordUserView(View):
     def __init__(self, information, ctx, discorduser):
-        super().__init__()
+        super().__init__(timeout=None)
         self.add_item(DiscordUserSelector(information, ctx, discorduser))
 
 
@@ -333,16 +454,18 @@ class DiscordUserSelector(Select):
         options = []
         # Find Discord User
         if discorduser.lower() != "none":
+            print("NUMBER 1")
             guild = ctx.guild
             if not guild:
-                ctx.response.send_message("Command must be used in a guild/server.")
+                ctx.response.edit_message("Command must be used in a guild/server.")
                 return
 
             # Search for the member in the guild, checking both display name and username
             member = discord.utils.find(lambda m: m.name.lower() == discorduser.lower() or m.display_name.lower() == discorduser.lower(), guild.members)
 
             if not member:
-                ctx.response.send_message(f"User '{discorduser}' not found in the server.")
+                print("NUMBER 2")
+                ctx.response.edit_message(f"User '{discorduser}' not found in the server.")
                 return
             options.append(discord.SelectOption(label=member.name,value=member.id))
         else:
@@ -449,9 +572,6 @@ class fourKSelector(Select):
     def __init__(self, information):
         self.information = information
 
-
-
-
         options = []
         options.append(discord.SelectOption(label="Yes", value="Yes"))
         options.append(discord.SelectOption(label="No", value="No"))
@@ -464,9 +584,30 @@ class fourKSelector(Select):
             await interaction.response.edit_message(content="Cancelled the request", view=None)
             return
         self.information['4k'] = self.values[0]
+
+        server = self.information.get('server', '')
+        termLength = calculate_term_length(server, self.information['paidAmount'], self.information['4k'])
+        today = datetime.now().date()
+        self.information['startDate'] = today.strftime('%Y-%m-%d')
+        self.information['endDate'] = today + relativedelta(months=termLength)
+        self.information['termLength'] = termLength
+
         print(self.information)
-        createUser(self.information)
-        await interaction.response.edit_message(content="User Added", view=None)
+        confirmation_message = (
+            f"Discord: {self.information.get('primaryDiscord')}\n"
+            f"Email: {self.information.get('primaryEmail')}\n"
+            f"Payment Method: {self.information.get('paymentMethod')}\n"
+            f"Paid Amount: {self.information.get('paidAmount')}\n"
+            f"Server: {self.information.get('server')}\n"
+            f"4k: {self.information.get('4k')}\n"
+            f"Start Date: {self.information.get('startDate')}\n"
+            f"End Date: {self.information.get('endDate')}\n"
+            f"Term Length: {self.information.get('termLength')}\n"
+        )
+
+        confirmation_view = ConfirmButtonsNewUser(interaction, self.information)
+
+        await interaction.response.edit_message(content=confirmation_message, view=confirmation_view)
 
 
 class UpdateSelectorView(View):
