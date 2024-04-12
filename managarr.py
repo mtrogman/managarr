@@ -20,7 +20,7 @@ def getConfig(file):
     return config
 
 
-config_location = "./config/config.yml"
+config_location = "/config/config.yml"
 config = getConfig(config_location)
 bot_token = config['discord']['token']
 
@@ -372,7 +372,7 @@ class ConfirmButtonsNewUser(View):
 
         # Extract relevant information from the user object
         server = self.information.get('server')
-        email = self.information.get('email')
+        email = self.information.get('primaryEmail')
         discordUser = self.information.get('primaryDiscord')
         discordUserId = self.information.get('primaryDiscordId')
         discordRole = config.get(f"PLEX-{server}", {}).get('role')
@@ -381,10 +381,7 @@ class ConfirmButtonsNewUser(View):
         section_names = standardLibraries + optionalLibraries if self.information.get('4k') == "Yes" else standardLibraries
         startDate = self.information.get('startDate')
         endDate = self.information.get('endDate')
-        subject = config.get(f"discord", {}).get('paymentSubject')
-        body = config.get(f"discord", {}).get('paymentBody')
-        # Perform string interpolation to substitute variables with values
-        body = body.format(primaryEmail=email, server=server, section_names=section_names, endDate=endDate)
+
 
         # Retrieve configuration for the Plex server
         plexConfig = config.get(f'PLEX-{server}', None)
@@ -394,8 +391,8 @@ class ConfirmButtonsNewUser(View):
 
         baseUrl = plexConfig.get('baseUrl', None)
         token = plexConfig.get('token', None)
-
-        await addRole(discordUserId, discordRole)
+        if discordUser:
+            await addRole(discordUserId, discordRole)
 
         if not baseUrl or not token:
             logging.error(f"Invalid configuration for Plex server '{server}'")
@@ -427,13 +424,9 @@ class ConfirmButtonsNewUser(View):
             f"Start Date: {startDate}\n"
             f"End Date: {endDate}\n"
             f"Status: {self.information.get('status')}\n"
-            f"Paid Amount: {self.information.get('newPaidAmount')}\n"
+            f"Paid Amount: {self.information.get('PaidAmount')}\n"
         )
 
-        # Send Discord Msg to user
-        await sendDiscordMessage(toUser=discordUserId, subject=subject, body=body)
-        # Send Email Msg to user
-        sendEmail(config_location, subject, body, email)
 
         await self.interaction.followup.send(content=f"{followup_message}", ephemeral=True)
 
