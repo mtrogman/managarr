@@ -11,7 +11,19 @@ from discord.ext import commands
 from discord.ui import Select, View, Button
 
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
-logging.basicConfig(stream=sys.stdout, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Set up logging to both console and file
+logFile = "/config/managarr.log"
+
+# Check if the log file exists, create it if it doesn't
+if not os.path.exists(logFile):
+    open(logFile, 'w').close()
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', handlers=[
+    logging.StreamHandler(sys.stdout),
+    logging.FileHandler(logFile)
+])
 
 
 def getConfig(file):
@@ -408,7 +420,7 @@ class ConfirmButtonsNewUser(View):
         try:
             addUser = plex.myPlexAccount().inviteFriend(user=email, server=plex, sections=section_names, allowSync=True)
             if addUser:
-                logging.info(f"User '{email}' has been successfully removed from Plex server '{server}'")
+                logging.info(f"User '{email}' has been successfully to {server}")
         except Exception as e:
             logging.error(f"Error inviting user {email} to {server} with the following libraries: {section_names}")
             logging.exception(e)
@@ -723,10 +735,10 @@ class UpdateSelector(Select):
 # Sync commands with discord
 @bot.event
 async def on_ready():
-    logging.info('Bot is Up and Ready!')
+    print(f"Bot is Up and Ready!")
     try:
         synced = await bot.tree.sync()
-        logging.info(f"Synced {len(synced)} command(s)")
+        print(f"Synced {len(synced)} command(s)")
     except Exception as e:
         logging.error(f"{e}")
 
