@@ -447,7 +447,6 @@ class DiscordUserSelector(Select):
         options = []
         # Find Discord User
         if discorduser.lower() != "none":
-            print("NUMBER 1")
             guild = ctx.guild
             if not guild:
                 ctx.response.edit_message("Command must be used in a guild/server.")
@@ -457,7 +456,6 @@ class DiscordUserSelector(Select):
             member = discord.utils.find(lambda m: m.name.lower() == discorduser.lower() or m.display_name.lower() == discorduser.lower(), guild.members)
 
             if not member:
-                print("NUMBER 2")
                 ctx.response.edit_message(f"User '{discorduser}' not found in the server.")
                 return
             options.append(discord.SelectOption(label=member.name,value=member.id))
@@ -585,7 +583,6 @@ class fourKSelector(Select):
         self.information['endDate'] = today + relativedelta(months=termLength)
         self.information['termLength'] = termLength
 
-        print(self.information)
         confirmation_message = (
             f"Discord: {self.information.get('primaryDiscord')}\n"
             f"Email: {self.information.get('primaryEmail')}\n"
