@@ -66,6 +66,7 @@ def createUser(information):
         primary_discord = information.get('primaryDiscord', '')
         primary_discord_id = information.get('primaryDiscordId', '')
         payment_method = information.get('paymentMethod', '')
+        name = information.get('name', '')
         paid_amount = information.get('paidAmount', '')
         server = information.get('server', '')
         is_4k = information.get('4k', '')
@@ -76,8 +77,8 @@ def createUser(information):
 
 
         # SQL query to insert a new user into the database
-        insert_query = "INSERT INTO users (primaryEmail, primaryDiscord, primaryDiscordId, paymentMethod, paidAmount, server, 4k, status, joinDate, startDate, endDate) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-        cursor.execute(insert_query, (primary_email, primary_discord, primary_discord_id, payment_method, paid_amount, server, is_4k, status, joinDate, startDate, endDate))
+        insert_query = "INSERT INTO users (primaryEmail, primaryDiscord, primaryDiscordId, paymentMethod, name, paidAmount, server, 4k, status, joinDate, startDate, endDate) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+        cursor.execute(insert_query, (primary_email, primary_discord, primary_discord_id, payment_method, name, paid_amount, server, is_4k, status, joinDate, startDate, endDate))
 
         # Commit the changes
         connection.commit()
@@ -763,12 +764,13 @@ async def payment_received(ctx, *, user: str, amount: float):
 
 
 @bot.tree.command(name="add_new_user", description="Add new user to DB")
-@app_commands.describe(discorduser="Discord Username; Put none or na if user not on Discord", email="User email address", amount="Payment amount (float)")
-async def add_new_user(ctx, *, discorduser: str = "none", email: str, amount: float):
+@app_commands.describe(discorduser="Discord Username; Put none or na if user not on Discord", email="User email address", Name="The name on the payment", amount="Payment amount (float)")
+async def add_new_user(ctx, *, discorduser: str = "none", email: str, name= str, amount: float):
     information = {}
     information['what'] = 'newuser'
     information['primaryEmail'] = email
     information['paidAmount'] = amount
+    information['name'] = name
     await ctx.response.send_message("Confirm Discord User", view=DiscordUserView(information, ctx, discorduser), ephemeral=True)
 
 
