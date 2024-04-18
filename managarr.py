@@ -11,7 +11,19 @@ from discord.ext import commands
 from discord.ui import Select, View, Button
 
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
-logging.basicConfig(stream=sys.stdout, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Set up logging to both console and file
+logFile = "/config/managarr.log"
+
+# Check if the log file exists, create it if it doesn't
+if not os.path.exists(logFile):
+    open(logFile, 'w').close()
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', handlers=[
+    logging.StreamHandler(sys.stdout),
+    logging.FileHandler(logFile)
+])
 
 
 def getConfig(file):
@@ -54,6 +66,7 @@ def createUser(information):
         primary_discord = information.get('primaryDiscord', '')
         primary_discord_id = information.get('primaryDiscordId', '')
         payment_method = information.get('paymentMethod', '')
+        name = information.get('name', '')
         paid_amount = information.get('paidAmount', '')
         server = information.get('server', '')
         is_4k = information.get('4k', '')
@@ -64,8 +77,8 @@ def createUser(information):
 
 
         # SQL query to insert a new user into the database
-        insert_query = "INSERT INTO users (primaryEmail, primaryDiscord, primaryDiscordId, paymentMethod, paidAmount, server, 4k, status, joinDate, startDate, endDate) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-        cursor.execute(insert_query, (primary_email, primary_discord, primary_discord_id, payment_method, paid_amount, server, is_4k, status, joinDate, startDate, endDate))
+        insert_query = "INSERT INTO users (primaryEmail, primaryDiscord, primaryDiscordId, paymentMethod, name, paidAmount, server, 4k, status, joinDate, startDate, endDate) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+        cursor.execute(insert_query, (primary_email, primary_discord, primary_discord_id, payment_method, name, paid_amount, server, is_4k, status, joinDate, startDate, endDate))
 
         # Commit the changes
         connection.commit()
@@ -408,7 +421,7 @@ class ConfirmButtonsNewUser(View):
         try:
             addUser = plex.myPlexAccount().inviteFriend(user=email, server=plex, sections=section_names, allowSync=True)
             if addUser:
-                logging.info(f"User '{email}' has been successfully removed from Plex server '{server}'")
+                logging.info(f"User '{email}' has been successfully to {server}")
         except Exception as e:
             logging.error(f"Error inviting user {email} to {server} with the following libraries: {section_names}")
             logging.exception(e)
@@ -447,7 +460,6 @@ class DiscordUserSelector(Select):
         options = []
         # Find Discord User
         if discorduser.lower() != "none":
-            print("NUMBER 1")
             guild = ctx.guild
             if not guild:
                 ctx.response.edit_message("Command must be used in a guild/server.")
@@ -457,7 +469,6 @@ class DiscordUserSelector(Select):
             member = discord.utils.find(lambda m: m.name.lower() == discorduser.lower() or m.display_name.lower() == discorduser.lower(), guild.members)
 
             if not member:
-                print("NUMBER 2")
                 ctx.response.edit_message(f"User '{discorduser}' not found in the server.")
                 return
             options.append(discord.SelectOption(label=member.name,value=member.id))
@@ -585,7 +596,6 @@ class fourKSelector(Select):
         self.information['endDate'] = today + relativedelta(months=termLength)
         self.information['termLength'] = termLength
 
-        print(self.information)
         confirmation_message = (
             f"Discord: {self.information.get('primaryDiscord')}\n"
             f"Email: {self.information.get('primaryEmail')}\n"
@@ -726,10 +736,10 @@ class UpdateSelector(Select):
 # Sync commands with discord
 @bot.event
 async def on_ready():
-    logging.info('Bot is Up and Ready!')
+    print(f"Bot is Up and Ready!")
     try:
         synced = await bot.tree.sync()
-        logging.info(f"Synced {len(synced)} command(s)")
+        print(f"Synced {len(synced)} command(s)")
     except Exception as e:
         logging.error(f"{e}")
 
@@ -754,12 +764,13 @@ async def payment_received(ctx, *, user: str, amount: float):
 
 
 @bot.tree.command(name="add_new_user", description="Add new user to DB")
-@app_commands.describe(discorduser="Discord Username; Put none or na if user not on Discord", email="User email address", amount="Payment amount (float)")
-async def add_new_user(ctx, *, discorduser: str = "none", email: str, amount: float):
+@app_commands.describe(discorduser="Discord Username; Put none or na if user not on Discord", email="User email address", Name="The name on the payment", amount="Payment amount (float)")
+async def add_new_user(ctx, *, discorduser: str = "none", email: str, name= str, amount: float):
     information = {}
     information['what'] = 'newuser'
     information['primaryEmail'] = email
     information['paidAmount'] = amount
+    information['name'] = name
     await ctx.response.send_message("Confirm Discord User", view=DiscordUserView(information, ctx, discorduser), ephemeral=True)
 
 
