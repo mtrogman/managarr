@@ -12,7 +12,7 @@
     <Privileged>false</Privileged>
     <Support>https://discord.gg/jZWZh5CS6c</Support>
     <Project>https://github.com/mtrogman/managarr</Project>
-    <Overview>managarr is a discord bot that allows you to manage the subscriptions for users.  This includes updating information around payments and (re)adding users who.</Overview>
+    <Overview>managarr is a discord bot that allows you to manage the subscriptions for users.  This includes updating information around payments and adding/changing users access to plex.</Overview>
     <Category>Tools: MediaServer Status:Stable</Category>
     <Icon>https://raw.githubusercontent.com/mtrogman/managarr/master/logo.png</Icon>
     <TemplateURL>https://raw.githubusercontent.com/mtrogman/unraid_templates/main/templates/managarr.xml</TemplateURL>
