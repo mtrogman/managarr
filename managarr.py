@@ -1,4 +1,4 @@
-import sys, re, yaml, mysql.connector, logging, discord, math
+import sys, re, yaml, mysql.connector, logging, discord, math, os
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 from plexapi.server import PlexServer
