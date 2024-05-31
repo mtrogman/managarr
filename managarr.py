@@ -353,7 +353,7 @@ class ConfirmButtonsNewUser(View):
 
         base_url = plex_config.get('baseUrl', None)
         token = plex_config.get('token', None)
-        if discord_user:
+        if discord_user and discord_user_id:  # Check if Discord user details are available
             await add_role(discord_user_id, discord_role)
 
         if not base_url or not token:
