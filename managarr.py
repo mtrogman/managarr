@@ -273,7 +273,7 @@ class ConfirmButtonsPayment(View):
 
             base_url = plex_config.get('baseUrl', None)
             token = plex_config.get('token', None)
-            if user.get('status') == "Inactive":
+            if user.get('status') == "Inactive" and discord_user and discord_user_id:  # Check if Discord user details are available
                 await add_role(discord_user_id, discord_role)
                 if not base_url or not token:
                     logging.error(f"Invalid configuration for Plex server '{server}'")
@@ -308,7 +308,10 @@ class ConfirmButtonsPayment(View):
                 f"Paid Amount: {user.get('newPaidAmount')}\n"
             )
 
-            await send_discord_message(to_user=discord_user_id, subject=subject, body=body)
+            # Send Discord message if Discord user details are available
+            if discord_user_id:
+                await send_discord_message(to_user=discord_user_id, subject=subject, body=body)
+            # Send Email Msg to user
             send_email(config_location, subject, body, user_email)
 
         await self.interaction.followup.send(content=f"{followup_message}", ephemeral=True)
