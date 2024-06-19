@@ -394,6 +394,119 @@ class ConfirmButtonsNewUser(View):
         await self.interaction.followup.send(content="Cancelled the request.", ephemeral=True)
 
 
+class ConfirmButtonsMoveUser(View):
+    def __init__(self, interaction, information):
+        super().__init__()
+        correct_button = Button(style=discord.ButtonStyle.primary, label="Correct")
+        correct_button.callback = self.correct_callback
+        self.add_item(correct_button)
+
+        cancel_button = Button(style=discord.ButtonStyle.danger, label="Cancel")
+        cancel_button.callback = self.cancel_callback
+        self.add_item(cancel_button)
+
+        self.interaction = interaction
+        self.information = information
+
+    async def correct_callback(self, button):
+        await self.interaction.delete_original_response()
+        followup_message = ""
+        old_server = self.information.get('old_server')
+        new_server = self.information.get('server')
+        old_4k = self.information.get('old_4k')
+        new_4k = self.information.get('4k')
+        email = self.information.get('primaryEmail')
+        standard_libraries = config.get(f"PLEX-{new_server}", {}).get('standardLibraries')
+        optional_libraries = config.get(f"PLEX-{new_server}", {}).get('optionalLibraries')
+        section_names = standard_libraries + optional_libraries if self.information.get('4k') == "Yes" else standard_libraries
+        old_section_names = standard_libraries + optional_libraries if self.information.get('old_4k') == "Yes" else standard_libraries
+
+        plex_config = config.get(f'PLEX-{new_server}', None)
+        if not isinstance(plex_config, dict):
+            logging.error(f"No configuration found for Plex server '{new_server}'")
+            return
+
+        base_url = plex_config.get('baseUrl', None)
+        token = plex_config.get('token', None)
+
+        if not base_url or not token:
+            logging.error(f"Invalid configuration for Plex server '{new_server}'")
+            return
+        try:
+            plex = PlexServer(base_url, token)
+        except Exception as e:
+            logging.error(f"Error authenticating to {base_url}")
+            logging.exception(e)
+
+        if old_server != new_server:
+            try:
+                add_user = plex.myPlexAccount().inviteFriend(user=email, server=plex, sections=section_names, allowSync=True)
+                if add_user:
+                    logging.info(f"User '{email}' has been successfully added to Plex server '{new_server}'")
+            except Exception as e:
+                logging.error(f"Error inviting user {email} to {new_server} with the following libraries: {section_names}")
+                logging.exception(e)
+            else:
+                old_plex_config = config.get(f'PLEX-{old_server}', None)
+                if not isinstance(old_plex_config, dict):
+                    logging.error(f"No configuration found for Plex server '{old_server}'")
+                    return
+
+                old_base_url = old_plex_config.get('baseUrl', None)
+                old_token = old_plex_config.get('token', None)
+
+                if not old_base_url or not old_token:
+                    logging.error(f"Invalid configuration for Plex server '{old_server}'")
+                    return
+                try:
+                    old_plex = PlexServer(old_base_url, old_token)
+                except Exception as e:
+                    logging.error(f"Error authenticating to {old_base_url}")
+                    logging.exception(e)
+
+                try:
+                    remove_libraries = old_plex.myPlexAccount().updateFriend(user=email, sections=old_section_names, server=old_plex, removeSections=True)
+                    if remove_libraries:
+                        logging.info(f"User '{email}' has been successfully removed from Old Plex server '{old_server}'")
+                except Exception as e:
+                    logging.error(f"Error removing user {email} from {old_server}")
+                    logging.exception(e)
+        else:
+            try:
+                update_user = plex.myPlexAccount().createExistingUser(user=email, server=plex, sections=section_names, allowSync=True)
+                if update_user:
+                    logging.info(f"User '{email}' has been successfully updated on Plex server '{new_server}'")
+            except Exception as e:
+                logging.error(f"Error updating libraries for user {email} on {old_server}")
+                logging.exception(e)
+
+        if new_server != old_server:
+            update_database(self.information.get('id'), "server", new_server)
+        if self.information['paymentAmount'] is not None:
+            newPaidAmount = float(self.information['paidAmount']) + float(self.information['paymentAmount'])
+            update_database(self.information.get('id'), "paidAmount", newPaidAmount)
+        if old_4k != new_4k:
+            update_database(self.information.get('id'), "4k", new_4k)
+
+        followup_message += (
+            "---------------------\n"
+            f"Email: {self.information.get('primaryEmail')}\n"
+            f"Old Server: {self.information.get('old_server')}\n"
+            f"Old 4k: {self.information.get('old_4k')}\n"
+            "---------------------\n"
+            f"Server: {self.information.get('server')}\n"
+            f"4k: {self.information.get('4k')}\n"
+            f"Paid Amount: {self.information.get('paidAmount')}\n"
+            f"End Date: {self.information.get('endDate')}\n"
+        )
+
+        await self.interaction.followup.send(content=f"{followup_message}", ephemeral=True)
+
+    async def cancel_callback(self, button):
+        await self.interaction.delete_original_response()
+        await self.interaction.followup.send(content="Cancelled the request.", ephemeral=True)
+
+
 class DiscordUserView(View):
     def __init__(self, information, ctx, discord_user):
         super().__init__(timeout=None)
@@ -495,7 +608,6 @@ class FourKView(View):
         super().__init__()
         self.add_item(FourKSelector(information))
 
-
 class FourKSelector(Select):
     def __init__(self, information):
         self.information = information
@@ -511,13 +623,18 @@ class FourKSelector(Select):
             await interaction.response.edit_message(content="Cancelled the request", view=None)
             return
         self.information['4k'] = self.values[0]
+        if self.information['what'] == 'payment':
+            await self.handle_payment(interaction)
+        elif self.information['what'] == 'move':
+            await self.handle_move(interaction)
+
+    async def handle_payment(self, interaction):
         server = self.information.get('server', '')
         term_length = calculate_term_length(server, self.information['paidAmount'], self.information['4k'])
         today = datetime.now().date()
         self.information['startDate'] = today.strftime('%Y-%m-%d')
         self.information['endDate'] = today + relativedelta(months=term_length)
         self.information['termLength'] = term_length
-
         confirmation_message = (
             f"Discord: {self.information.get('primaryDiscord')}\n"
             f"Email: {self.information.get('primaryEmail')}\n"
@@ -531,6 +648,21 @@ class FourKSelector(Select):
         )
 
         confirmation_view = ConfirmButtonsNewUser(interaction, self.information)
+        await interaction.response.edit_message(content=confirmation_message, view=confirmation_view)
+    async def handle_move(self, interaction):
+        confirmation_message = (
+            "---------------------\n"
+            f"Email: {self.information.get('primaryEmail')}\n"
+            f"Old Server: {self.information.get('old_server')}\n"
+            f"Old 4k: {self.information.get('old_4k')}\n"
+            "---------------------\n"
+            f"Server: {self.information.get('server')}\n"
+            f"4k: {self.information.get('4k')}\n"
+            f"Paid Amount: {self.information.get('paidAmount')}\n"
+            f"End Date: {self.information.get('endDate')}\n"
+        )
+
+        confirmation_view = ConfirmButtonsMoveUser(interaction, self.information)
         await interaction.response.edit_message(content=confirmation_message, view=confirmation_view)
 
 
@@ -562,6 +694,19 @@ class UpdateSelector(Select):
         selected_users = [self.search_results[idx] for idx in selected_user_indices]
         self.information.setdefault('users', []).extend(selected_users)
 
+        if self.information['what'] == 'payment':
+            await self.view.handle_payment(interaction, selected_users)
+        elif self.information['what'] == 'move':
+            await self.view.handle_move(interaction, selected_users)
+
+class UpdateSelectorView(View):
+    def __init__(self, search_results, information):
+        super().__init__()
+        self.search_results = search_results
+        self.information = information
+        self.add_item(UpdateSelector(search_results, information))
+
+    async def handle_payment(self, interaction, selected_users):
         user_count = len(self.information.get('users', []))
         if user_count >= 1:
             total_prices = {'1Month': 0, '3Month': 0, '6Month': 0, '12Month': 0}
@@ -630,6 +775,38 @@ class UpdateSelector(Select):
             confirmation_view = ConfirmButtonsPayment(interaction, self.information)
             await interaction.response.edit_message(content=confirmation_message, view=confirmation_view)
 
+    async def handle_move(self, interaction, selected_users):
+        self.information['primaryEmail'] = selected_users[0].get('primaryEmail')
+        self.information['old_server'] = selected_users[0].get('server')
+        self.information['old_4k'] = selected_users[0].get('4k')
+        self.information['startDate'] = selected_users[0].get('startDate')
+        self.information['endDate'] = selected_users[0].get('endDate')
+        self.information['status'] = selected_users[0].get('status')
+        self.information['paidAmount'] = selected_users[0].get('paidAmount')
+        self.information['id'] = selected_users[0].get('id')
+
+        content_message = (
+            "---------------------\n"
+            f"Primary Email: {self.information['primaryEmail']}\n"
+            f"Server: {self.information['old_server']}\n"
+            f"4k: {self.information['old_4k']}\n"
+            f"Start Date: {self.information['startDate']}\n"
+            f"End Date: {self.information['endDate']}\n"
+            f"Status: {self.information['status']}\n"
+            f"Paid Amount: {self.information['paidAmount']}\n"
+            "---------------------\n\n"
+        )
+        if selected_users[0].get('status') != "Active":
+            content_message += (
+            f"USER IS INACTIVE"
+            )
+            await interaction.response.edit_message(content=content_message, view=None)
+        else:
+            content_message += (
+            f"Please choose server to move user to\n"
+            )
+            await interaction.response.edit_message(content=content_message, view=ServerView(self.information))
+
 
 # Sync commands with discord
 @bot.event
@@ -660,5 +837,16 @@ async def add_new_user(ctx, *, discorduser: str = "none", email: str, payname: s
     information = {'what': 'newuser', 'primaryEmail': email, 'paidAmount': amount, 'payname': payname}
     await ctx.response.send_message("Confirm Discord User", view=DiscordUserView(information, ctx, discorduser), ephemeral=True)
 
+
+# Bot command to "Change a user's subscription (change server or add/remove 4k library)"
+@bot.tree.command(name="move_user", description="Update user's plex libraries")
+@app_commands.describe(user="User identifier (Discord user, email address, or paymentPerson)", amount="Payment amount (float)")
+async def move_user(ctx, *, user: str, amount: float = None):
+    search_results = find_user(user)
+    if not search_results:
+        await ctx.response.send_message(f"No user found matching the given identifier: {user}", ephemeral=True)
+        return
+    information = {'what': 'move', 'paymentAmount': amount}
+    await ctx.response.send_message("Select the correct user", view=UpdateSelectorView(search_results, information), ephemeral=True)
 
 bot.run(bot_token)
