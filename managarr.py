@@ -416,6 +416,7 @@ class ConfirmButtonsMoveUser(View):
         old_4k = self.information.get('old_4k')
         new_4k = self.information.get('4k')
         email = self.information.get('primaryEmail')
+        discord_user_id = self.information.get('primaryDiscordId')
         standard_libraries = config.get(f"PLEX-{new_server}", {}).get('standardLibraries')
         optional_libraries = config.get(f"PLEX-{new_server}", {}).get('optionalLibraries')
         section_names = standard_libraries + optional_libraries if self.information.get('4k') == "Yes" else standard_libraries
@@ -472,13 +473,35 @@ class ConfirmButtonsMoveUser(View):
                     logging.error(f"Error removing user {email} from {old_server}")
                     logging.exception(e)
         else:
+            # Remove the user from the server
             try:
-                update_user = plex.myPlexAccount().createExistingUser(user=email, server=plex, sections=section_names, allowSync=True)
-                if update_user:
-                    logging.info(f"User '{email}' has been successfully updated on Plex server '{new_server}'")
+                remove_user = plex.myPlexAccount().updateFriend(user=email, sections=section_names, server=plex, removeSections=True)
+                if remove_user:
+                    logging.info(f"User '{email}' has been successfully removed from Plex server '{new_server}'")
             except Exception as e:
-                logging.error(f"Error updating libraries for user {email} on {old_server}")
+                logging.error(f"Error removing user {email} from {new_server}")
                 logging.exception(e)
+
+            # Re-add the user with the new libraries
+            try:
+                add_user = plex.myPlexAccount().inviteFriend(user=email, server=plex, sections=section_names, allowSync=True)
+                if add_user:
+                    logging.info(
+                        f"User '{email}' has been successfully added back to Plex server '{new_server}' with new libraries")
+            except Exception as e:
+                logging.error(
+                    f"Error inviting user {email} to {new_server} with the following libraries: {section_names}")
+                logging.exception(e)
+                try:
+                    # If adding with new libraries fails, re-add with old libraries
+                    add_user = plex.myPlexAccount().inviteFriend(user=email, server=plex, sections=old_section_names, allowSync=True)
+                    if add_user:
+                        logging.info(
+                            f"User '{email}' has been successfully re-added to Plex server '{new_server}' with old libraries")
+                except Exception as e:
+                    logging.error(
+                        f"Error re-adding user {email} to {new_server} with the old libraries: {old_section_names}")
+                    logging.exception(e)
 
         if new_server != old_server:
             update_database(self.information.get('id'), "server", new_server)
@@ -487,6 +510,16 @@ class ConfirmButtonsMoveUser(View):
             update_database(self.information.get('id'), "paidAmount", newPaidAmount)
         if old_4k != new_4k:
             update_database(self.information.get('id'), "4k", new_4k)
+
+        # Send Discord message if Discord user details are available
+        subject = config.get(f"discord", {}).get('moveSubject')
+        body = config.get(f"discord", {}).get('moveBody')
+        body = body.format(primaryEmail=email, server=new_server, section_names=section_names)
+        if discord_user_id:
+            await send_discord_message(to_user=discord_user_id, subject=subject, body=body)
+        # Send Email Msg to user
+        send_email(config_location, subject, body, email)
+
 
         followup_message += (
             "---------------------\n"
@@ -784,6 +817,9 @@ class UpdateSelectorView(View):
         self.information['status'] = selected_users[0].get('status')
         self.information['paidAmount'] = selected_users[0].get('paidAmount')
         self.information['id'] = selected_users[0].get('id')
+        self.information['primaryDiscordId'] = selected_users[0].get('primaryDiscordId')
+        print(selected_users[0])
+        print(self.information)
 
         content_message = (
             "---------------------\n"
