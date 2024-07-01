@@ -994,6 +994,18 @@ async def add_new_user(ctx, *, discorduser: str = "none", email: str, payname: s
     await ctx.response.send_message("Confirm Discord User", view=DiscordUserView(information, ctx, discorduser), ephemeral=True)
 
 
+# Bot command to "Change a user's subscription (change server or add/remove 4k library)"
+@bot.tree.command(name="move_user", description="Update user's plex libraries")
+@app_commands.describe(user="User identifier (Discord user, email address, or paymentPerson)", amount="Payment amount (float)")
+async def move_user(ctx, *, user: str, amount: float = None):
+    search_results = find_user(user)
+    if not search_results:
+        await ctx.response.send_message(f"No user found matching the given identifier: {user}", ephemeral=True)
+        return
+    information = {'what': 'move', 'paymentAmount': amount}
+    await ctx.response.send_message("Select the correct user", view=UpdateSelectorView(search_results, information), ephemeral=True)
+
+
 # Bot command to add a new Plex server
 @bot.tree.command(name="add_plex_server", description="Add a new Plex server to the configuration")
 @app_commands.describe(email="Plex account email", password="Plex account password")
