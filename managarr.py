@@ -9,6 +9,7 @@ import os
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from plexapi.server import PlexServer
+from plexapi.myplex import MyPlexAccount
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import smtplib
@@ -844,6 +845,125 @@ class UpdateSelectorView(View):
             await interaction.response.edit_message(content=content_message, view=ServerView(self.information))
 
 
+class ConfirmButtonsNewServer(View):
+    def __init__(self, interaction, selected_server, standard_library_titles, optional_library_titles_selected):
+        super().__init__()
+        correct_button = Button(style=discord.ButtonStyle.primary, label="Confirm")
+        correct_button.callback = self.correct_callback
+        self.add_item(correct_button)
+
+        cancel_button = Button(style=discord.ButtonStyle.danger, label="Cancel")
+        cancel_button.callback = self.cancel_callback
+        self.add_item(cancel_button)
+
+        self.interaction = interaction
+        self.selected_server = selected_server
+        self.standard_library_titles = standard_library_titles
+        self.optional_library_titles_selected = optional_library_titles_selected
+
+    async def correct_callback(self, interaction: discord.Interaction):
+        await self.interaction.delete_original_response()
+
+        base_url = self.selected_server.connections[0].uri
+        token = self.selected_server.accessToken
+
+        # Add the new Plex server to the config
+        new_server = {
+            'serverName': self.selected_server.name,
+            'baseUrl': base_url,
+            'token': token,
+            'standardLibraries': self.standard_library_titles,
+            'optionalLibraries': self.optional_library_titles_selected
+        }
+
+        config["PLEX-" + self.selected_server.name.replace(" ", "_")] = new_server
+
+        with open(config_location, 'w') as config_file:
+            yaml.dump(config, config_file)
+
+        await self.interaction.followup.send(content="Plex server added successfully!", ephemeral=True)
+
+    async def cancel_callback(self, interaction: discord.Interaction):
+        await self.interaction.delete_original_response()
+        await self.interaction.followup.send(content="Operation cancelled.", ephemeral=True)
+
+
+class StandardLibrarySelect(Select):
+    def __init__(self, interaction, selected_server, libraries):
+        standard_library_options = [discord.SelectOption(label=lib.title, value=lib.title) for lib in libraries]
+        super().__init__(placeholder="Choose standard libraries", options=standard_library_options, min_values=1, max_values=len(libraries))
+        self.interaction = interaction
+        self.selected_server = selected_server
+        self.libraries = libraries
+
+    async def callback(self, interaction: discord.Interaction):
+        standard_library_titles = self.values
+        optional_library_titles = [lib.title for lib in self.libraries if lib.title not in standard_library_titles]
+
+        if not optional_library_titles:
+            await self.confirm(interaction, self.selected_server, standard_library_titles, [])
+        else:
+            optional_library_options = [discord.SelectOption(label=lib, value=lib) for lib in optional_library_titles]
+            view = View()
+            view.add_item(OptionalLibrarySelect(self.interaction, self.selected_server, standard_library_titles, optional_library_options))
+            await interaction.response.edit_message(content="Choose optional libraries:", view=view)
+
+    async def confirm(self, interaction: discord.Interaction, selected_server, standard_library_titles, optional_library_titles_selected):
+        confirmation_message = (
+            f"Selected Server: {selected_server.name}\n"
+            f"Standard Libraries: {', '.join(standard_library_titles)}\n"
+            f"Optional Libraries: {', '.join(optional_library_titles_selected)}\n"
+            "Confirm?"
+        )
+        view = ConfirmButtonsNewServer(interaction, selected_server, standard_library_titles, optional_library_titles_selected)
+        await interaction.response.edit_message(content=confirmation_message, view=view)
+
+
+class OptionalLibrarySelect(Select):
+    def __init__(self, interaction, selected_server, standard_library_titles, optional_library_options):
+        super().__init__(placeholder="Choose optional libraries (can be none)", options=optional_library_options, min_values=0, max_values=len(optional_library_options))
+        self.interaction = interaction
+        self.selected_server = selected_server
+        self.standard_library_titles = standard_library_titles
+
+    async def callback(self, interaction: discord.Interaction):
+        optional_library_titles_selected = self.values
+        await self.confirm(interaction, self.selected_server, self.standard_library_titles, optional_library_titles_selected)
+
+    async def confirm(self, interaction: discord.Interaction, selected_server, standard_library_titles, optional_library_titles_selected):
+        confirmation_message = (
+            f"Selected Server: {selected_server.name}\n"
+            f"Standard Libraries: {', '.join(standard_library_titles)}\n"
+            f"Optional Libraries: {', '.join(optional_library_titles_selected)}\n"
+            "Confirm?"
+        )
+        view = ConfirmButtonsNewServer(interaction, selected_server, standard_library_titles, optional_library_titles_selected)
+        await interaction.response.edit_message(content=confirmation_message, view=view)
+
+
+class ServerSelect(Select):
+    def __init__(self, interaction, servers):
+        server_options = [discord.SelectOption(label=server.name, value=server.name) for server in servers]
+        super().__init__(placeholder="Choose a Plex server", options=server_options, min_values=1, max_values=1)
+        self.interaction = interaction
+        self.servers = servers
+
+    async def callback(self, interaction: discord.Interaction):
+        server_name = self.values[0]
+        selected_server = next(server for server in self.servers if server.name == server_name)
+        try:
+            plex = selected_server.connect()
+            libraries = plex.library.sections()
+        except Exception as e:
+            await interaction.response.send_message(f"Error connecting to server: {str(e)}", ephemeral=True)
+            return
+
+        view = View()
+        view.add_item(StandardLibrarySelect(self.interaction, selected_server, libraries))
+        await self.interaction.delete_original_response()
+        await interaction.response.send_message("Choose standard libraries:", view=view, ephemeral=True)
+
+
 # Sync commands with discord
 @bot.event
 async def on_ready():
@@ -874,15 +994,27 @@ async def add_new_user(ctx, *, discorduser: str = "none", email: str, payname: s
     await ctx.response.send_message("Confirm Discord User", view=DiscordUserView(information, ctx, discorduser), ephemeral=True)
 
 
-# Bot command to "Change a user's subscription (change server or add/remove 4k library)"
-@bot.tree.command(name="move_user", description="Update user's plex libraries")
-@app_commands.describe(user="User identifier (Discord user, email address, or paymentPerson)", amount="Payment amount (float)")
-async def move_user(ctx, *, user: str, amount: float = None):
-    search_results = find_user(user)
-    if not search_results:
-        await ctx.response.send_message(f"No user found matching the given identifier: {user}", ephemeral=True)
+# Bot command to add a new Plex server
+@bot.tree.command(name="add_plex_server", description="Add a new Plex server to the configuration")
+@app_commands.describe(email="Plex account email", password="Plex account password")
+async def add_plex_server(ctx, *, email: str, password: str):
+    try:
+        account = MyPlexAccount(email, password)
+        servers = account.resources()
+    except Exception as e:
+        await ctx.response.send_message(f"Error: {str(e)}", ephemeral=True)
         return
-    information = {'what': 'move', 'paymentAmount': amount}
-    await ctx.response.send_message("Select the correct user", view=UpdateSelectorView(search_results, information), ephemeral=True)
+
+    # Filter the resources to get only servers
+    servers = [server for server in servers if 'server' in server.provides]
+
+    if not servers:
+        await ctx.response.send_message("No servers found. Please check your credentials.", ephemeral=True)
+        return
+
+    view = View()
+    view.add_item(ServerSelect(ctx, servers))
+    await ctx.response.send_message("Choose a Plex server:", view=view, ephemeral=True)
+
 
 bot.run(bot_token)
