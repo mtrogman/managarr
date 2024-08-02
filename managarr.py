@@ -73,7 +73,7 @@ def create_user(information):
         primary_discord = information.get('primaryDiscord', '')
         primary_discord_id = information.get('primaryDiscordId', '')
         payment_method = information.get('paymentMethod', '')
-        pay_name = information.get('payname', '')
+        payment_person = information.get('paymentPerson', '')
         paid_amount = information.get('paidAmount', '')
         server = information.get('server', '')
         is_4k = information.get('4k', '')
@@ -84,10 +84,10 @@ def create_user(information):
 
         # SQL query to insert a new user into the database
         insert_query = """
-        INSERT INTO users (primaryEmail, primaryDiscord, primaryDiscordId, paymentMethod, payname, paidAmount, server, 4k, status, joinDate, startDate, endDate)
+        INSERT INTO users (primaryEmail, primaryDiscord, primaryDiscordId, paymentMethod, paymentPerson, paidAmount, server, 4k, status, joinDate, startDate, endDate)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
-        cursor.execute(insert_query, (primary_email, primary_discord, primary_discord_id, payment_method, pay_name, paid_amount, server, is_4k, status, join_date, start_date, end_date))
+        cursor.execute(insert_query, (primary_email, primary_discord, primary_discord_id, payment_method, payment_person, paid_amount, server, is_4k, status, join_date, start_date, end_date))
 
         # Commit the changes
         connection.commit()
@@ -661,6 +661,8 @@ class FourKSelector(Select):
             await self.handle_payment(interaction)
         elif self.information['what'] == 'move':
             await self.handle_move(interaction)
+        elif self.information['what'] == 'newuser':
+            await self.handle_new_user(interaction)
 
     async def handle_payment(self, interaction):
         server = self.information.get('server', '')
@@ -683,6 +685,7 @@ class FourKSelector(Select):
 
         confirmation_view = ConfirmButtonsNewUser(interaction, self.information)
         await interaction.response.edit_message(content=confirmation_message, view=confirmation_view)
+
     async def handle_move(self, interaction):
         confirmation_message = (
             "---------------------\n"
@@ -698,6 +701,29 @@ class FourKSelector(Select):
 
         confirmation_view = ConfirmButtonsMoveUser(interaction, self.information)
         await interaction.response.edit_message(content=confirmation_message, view=confirmation_view)
+
+    async def handle_new_user(self, interaction):
+        server = self.information.get('server', '')
+        term_length = calculate_term_length(server, self.information['paidAmount'], self.information['4k'])
+        today = datetime.now().date()
+        self.information['startDate'] = today.strftime('%Y-%m-%d')
+        self.information['endDate'] = today + relativedelta(months=term_length)
+        self.information['termLength'] = term_length
+        confirmation_message = (
+            f"Discord: {self.information.get('primaryDiscord')}\n"
+            f"Email: {self.information.get('primaryEmail')}\n"
+            f"Payment Method: {self.information.get('paymentMethod')}\n"
+            f"Paid Amount: {self.information.get('paidAmount')}\n"
+            f"Server: {self.information.get('server')}\n"
+            f"4k: {self.information.get('4k')}\n"
+            f"Start Date: {self.information.get('startDate')}\n"
+            f"End Date: {self.information.get('endDate')}\n"
+            f"Term Length: {self.information.get('termLength')}\n"
+        )
+
+        confirmation_view = ConfirmButtonsNewUser(interaction, self.information)
+        await interaction.response.edit_message(content=confirmation_message, view=confirmation_view)
+
 
 
 class UpdateSelectorView(View):
@@ -988,9 +1014,9 @@ async def payment_received(ctx, *, user: str, amount: float):
 
 
 @bot.tree.command(name="add_new_user", description="Add new user to DB")
-@app_commands.describe(discorduser="Discord Username; Put none or na if user not on Discord", email="User email address", payname="The name on the payment", amount="Payment amount (float)")
-async def add_new_user(ctx, *, discorduser: str = "none", email: str, payname: str, amount: float):
-    information = {'what': 'newuser', 'primaryEmail': email, 'paidAmount': amount, 'payname': payname}
+@app_commands.describe(discorduser="Discord Username; Put none or na if user not on Discord", email="User email address", payment_person="The name on the payment", amount="Payment amount (float)")
+async def add_new_user(ctx, *, discorduser: str = "none", email: str, payment_person: str, amount: float):
+    information = {'what': 'newuser', 'primaryEmail': email, 'paidAmount': amount, 'paymentPerson': payment_person}
     await ctx.response.send_message("Confirm Discord User", view=DiscordUserView(information, ctx, discorduser), ephemeral=True)
 
 
