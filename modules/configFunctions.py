@@ -1,4 +1,4 @@
-import os, yaml, sys
+import yaml
 
 def get_config(file):
     with open(file, 'r') as yaml_file:

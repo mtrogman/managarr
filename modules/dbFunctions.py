@@ -1,9 +1,21 @@
 # modules/dbFunctions.py
 
 import mysql.connector
-import yaml
 import logging
+import re
+from modules import configFunctions
 
+
+config_location = "/config/config.yml"
+config = configFunctions.get_config(config_location)
+
+db_config = {
+    'host': config['database']['host'],
+    'database': config['database']['database'],
+    'user': config['database']['user'],
+    'password': config['database']['password'],
+    'port': config['database']['port']
+}
 
 def create_connection():
     try:
