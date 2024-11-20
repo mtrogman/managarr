@@ -16,6 +16,7 @@ import smtplib
 from discord import app_commands, Embed
 from discord.ext import commands
 from discord.ui import Select, View, Button
+from modules import dbFunctions, discordFunctions, configFunctions, mathFunctions
 
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
 
@@ -32,15 +33,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
     logging.FileHandler(log_file)
 ])
 
-
-def get_config(file):
-    with open(file, 'r') as yaml_file:
-        config = yaml.safe_load(yaml_file)
-    return config
-
-
 config_location = "/config/config.yml"
-config = get_config(config_location)
+config = configFunctions.get_config(config_location)
 bot_token = config['discord']['token']
 
 db_config = {
@@ -50,230 +44,6 @@ db_config = {
     'password': config['database']['password'],
     'port': config['database']['port']
 }
-
-
-def create_connection():
-    try:
-        connection = mysql.connector.connect(**db_config)
-        if connection.is_connected():
-            return connection
-    except mysql.connector.Error as e:
-        logging.error(f"Error connecting to the database: {e}")
-        return None
-
-
-def create_user(information):
-    try:
-        connection = create_connection()
-        if connection:
-            cursor = connection.cursor()
-
-        # Extract information from the input dictionary
-        primary_email = information.get('primaryEmail', '')
-        primary_discord = information.get('primaryDiscord', '')
-        primary_discord_id = information.get('primaryDiscordId', '')
-        payment_method = information.get('paymentMethod', '')
-        payment_person = information.get('paymentPerson', '')
-        paid_amount = information.get('paidAmount', '')
-        server = information.get('server', '')
-        is_4k = information.get('4k', '')
-        status = "Active"
-        start_date = information.get('startDate', '')
-        join_date = start_date
-        end_date = information.get('endDate', '')
-
-        # SQL query to insert a new user into the database
-        insert_query = """
-        INSERT INTO users (primaryEmail, primaryDiscord, primaryDiscordId, paymentMethod, paymentPerson, paidAmount, server, 4k, status, joinDate, startDate, endDate)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """
-        cursor.execute(insert_query, (primary_email, primary_discord, primary_discord_id, payment_method, payment_person, paid_amount, server, is_4k, status, join_date, start_date, end_date))
-
-        # Commit the changes
-        connection.commit()
-        logging.info(f"Created new user with primary email: {primary_email}")
-    except mysql.connector.Error as e:
-        logging.error(f"Error creating user: {e}")
-    finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
-
-
-def update_database(user_id, field, value):
-    try:
-        connection = create_connection()
-        if connection:
-            cursor = connection.cursor()
-
-            # SQL query to update the specified field for the given user ID
-            update_query = f"UPDATE users SET {field} = %s WHERE id = %s"
-            cursor.execute(update_query, (value, user_id))
-
-            # Commit the changes
-            connection.commit()
-            logging.info(f"Updated {field} for user ID {user_id} to {value}")
-    except mysql.connector.Error as e:
-        logging.error(f"Error updating database: {e}")
-    finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
-
-
-def find_user(search_term):
-    search_term = search_term.lower()
-    columns = ['primaryEmail', 'secondaryEmail', 'primaryDiscord', 'secondaryDiscord', 'paymentPerson']
-    matching_rows_list = []
-    email_regex = r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}$'
-
-    for column in columns:
-        try:
-            connection = create_connection()
-            if connection:
-                cursor = connection.cursor(dictionary=True)
-                is_email_field = re.search(email_regex, column.lower())
-                if is_email_field:
-                    query = f"SELECT * FROM users WHERE LOWER({column}) LIKE %s AND {column} REGEXP %s"
-                    cursor.execute(query, ('%' + search_term + '%', email_regex))
-                else:
-                    query = f"SELECT * FROM users WHERE LOWER({column}) LIKE %s"
-                    cursor.execute(query, ('%' + search_term + '%',))
-                matching_rows = cursor.fetchall()
-                for row in matching_rows:
-                    if row not in matching_rows_list:
-                        matching_rows_list.append(row)
-        except mysql.connector.Error as e:
-            logging.error(f"Error searching for users: {e}")
-        finally:
-            if connection.is_connected():
-                cursor.close()
-                connection.close()
-
-    return matching_rows_list
-
-
-async def add_role(user_id, role_name):
-    guild_id = int(config['discord']['guildId'])
-
-    try:
-        guild = bot.get_guild(guild_id)
-        if not guild:
-            logging.error(f"Guild with ID {guild_id} not found.")
-            return  # Exit early if guild is not found
-
-        user = await guild.fetch_member(user_id)
-        if not user:
-            logging.error(f"Member with ID {user_id} not found in the guild.")
-            return  # Exit early if user is not found
-
-        role = discord.utils.get(guild.roles, name=role_name)
-        if not role:
-            logging.error(f"Role '{role_name}' not found in guild '{guild.name}'.")
-            return  # Exit early if role is not found
-
-        logging.info(f"Assigning role '{role_name}' to user ID {user_id}")
-        await user.add_roles(role)
-        logging.info(f"Added role '{role_name}' to user {user.name} ({user.id})")
-
-    except discord.Forbidden:
-        logging.error(f"Bot doesn't have permission to add roles.")
-    except discord.HTTPException as e:
-        logging.error(f"HTTP error occurred while adding role: {e}")
-
-
-
-async def send_discord_message(to_user, subject, body):
-    user = await bot.fetch_user(to_user)
-    embed = Embed(title=f"**{subject}**", description=body, color=discord.Colour.blue())
-    try:
-        await user.send(embed=embed)
-    except discord.errors.Forbidden as e:
-        logging.warning(f"Failed to send message to {user.name}#{user.discriminator}: {e}")
-    except Exception as e:
-        logging.error(f"An unexpected error occurred for {user.name}: {e}")
-
-
-def send_email(config_location, subject, body, to_emails):
-    config = get_config(config_location)
-    email_config = config.get('email', {})
-    smtp_server = email_config.get('smtpServer', '')
-    smtp_port = email_config.get('smtpPort', 587)
-    smtp_username = email_config.get('smtpUsername', '')
-    smtp_password = email_config.get('smtpPassword', '')
-
-    if not smtp_server or not smtp_username or not smtp_password:
-        raise ValueError("Email configuration is incomplete. Please check your config file.")
-
-    msg = MIMEMultipart()
-    msg['From'] = smtp_username
-    msg['To'] = to_emails
-    msg['Subject'] = subject
-    msg.attach(MIMEText(body, 'plain'))
-
-    with smtplib.SMTP(smtp_server, smtp_port) as server:
-        server.starttls()
-        server.login(smtp_username, smtp_password)
-        server.sendmail(smtp_username, to_emails, msg.as_string())
-
-
-def calculate_term_length(server, amount, is_4k):
-    config = get_config(config_location)
-    plex_config = config.get(f"PLEX-{server}", {})
-    pricing_section = plex_config.get('4k' if is_4k == 'Yes' else '1080p', {})
-
-    one_month_price = pricing_section.get('1Month', 0)
-    three_month_price = pricing_section.get('3Month', 0)
-    six_month_price = pricing_section.get('6Month', 0)
-    twelve_month_price = pricing_section.get('12Month', 0)
-
-    # Check if the amount matches exactly any known subscription length
-    if amount == twelve_month_price:
-        return 12
-    elif amount == six_month_price:
-        return 6
-    elif amount == three_month_price:
-        return 3
-    elif amount == one_month_price:
-        return 1
-
-    # Check if the amount covers multiple years
-    if amount > twelve_month_price:
-        years_paid_for = amount / twelve_month_price
-        if years_paid_for.is_integer():
-            return int(years_paid_for * 12)  # Convert years to months
-
-    # Mixed payment scenario: Iteratively calculate possible month combinations
-    term_length = 0
-    remaining_amount = amount
-
-    # Check for the maximum number of full 12-month subscriptions first
-    while remaining_amount >= twelve_month_price:
-        term_length += 12
-        remaining_amount -= twelve_month_price
-
-    # Check for the maximum number of full 6-month subscriptions
-    while remaining_amount >= six_month_price:
-        term_length += 6
-        remaining_amount -= six_month_price
-
-    # Check for the maximum number of full 3-month subscriptions
-    while remaining_amount >= three_month_price:
-        term_length += 3
-        remaining_amount -= three_month_price
-
-    # Check for the maximum number of full 1-month subscriptions
-    while remaining_amount >= one_month_price:
-        term_length += 1
-        remaining_amount -= one_month_price
-
-    # Handle small overpayments by checking if the remaining amount is negligible
-    if remaining_amount < one_month_price:
-        return term_length
-
-    # If the remaining amount is still significant, then the payment does not exactly match any subscription plan
-    return 0
-
 
 
 class ConfirmButtonsPayment(View):
@@ -298,7 +68,6 @@ class ConfirmButtonsPayment(View):
             user_id = user.get('id')
             new_paid_amount = user.get('newPaidAmount')
             new_start_date = user.get('newStartDate')
-            new_end_date = user.get('newEndDate')
             user_email = user.get('primaryEmail')
             server = user.get('server')
             discord_user = user.get('primaryDiscord')
@@ -320,7 +89,7 @@ class ConfirmButtonsPayment(View):
             base_url = plex_config.get('baseUrl', None)
             token = plex_config.get('token', None)
             if user.get('status') == "Inactive" and discord_user and discord_user_id:  # Check if Discord user details are available
-                await add_role(discord_user_id, discord_role)
+                await discordFunctions.add_role(discord_user_id, discord_role)
                 if not base_url or not token:
                     logging.error(f"Invalid configuration for Plex server '{server}'")
                     return
@@ -337,10 +106,10 @@ class ConfirmButtonsPayment(View):
                     logging.error(f"Error inviting user {user_email} to {server} with the following libraries: {section_names}")
                     logging.exception(e)
 
-            update_database(user_id, "paidAmount", new_paid_amount)
-            update_database(user_id, "startDate", new_start_date)
-            update_database(user_id, "endDate", new_end_date)
-            update_database(user_id, "status", "Active")
+            dbFunctions.update_database(user_id, "paidAmount", new_paid_amount)
+            dbFunctions.update_database(user_id, "startDate", new_start_date)
+            dbFunctions.update_database(user_id, "endDate", new_end_date)
+            dbFunctions.update_database(user_id, "status", "Active")
 
             followup_message += (
                 "---------------------\n"
@@ -356,7 +125,7 @@ class ConfirmButtonsPayment(View):
 
             # Send Discord message if Discord user details are available
             if discord_user_id:
-                await send_discord_message(to_user=discord_user_id, subject=subject, body=body)
+                await discordFunctions.send_discord_message(to_user=discord_user_id, subject=subject, body=body)
             # Send Email Msg to user
             send_email(config_location, subject, body, user_email)
 
@@ -403,7 +172,7 @@ class ConfirmButtonsNewUser(View):
         base_url = plex_config.get('baseUrl', None)
         token = plex_config.get('token', None)
         if discord_user and discord_user_id:  # Check if Discord user details are available
-            await add_role(discord_user_id, discord_role)
+            await discordFunctions.add_role(discord_user_id, discord_role)
 
         if not base_url or not token:
             logging.error(f"Invalid configuration for Plex server '{server}'")
@@ -421,7 +190,7 @@ class ConfirmButtonsNewUser(View):
             logging.error(f"Error inviting user {email} to {server} with the following libraries: {section_names}")
             logging.exception(e)
 
-        create_user(self.information)
+        dbFunctions.create_user(self.information)
         followup_message += (
             f"Discord: {discord_user}\n"
             f"Email: {email}\n"
@@ -550,19 +319,19 @@ class ConfirmButtonsMoveUser(View):
                     logging.exception(e)
 
         if new_server != old_server:
-            update_database(self.information.get('id'), "server", new_server)
+            dbFunctions.update_database(self.information.get('id'), "server", new_server)
         if self.information['paymentAmount'] is not None:
             newPaidAmount = float(self.information['paidAmount']) + float(self.information['paymentAmount'])
-            update_database(self.information.get('id'), "paidAmount", newPaidAmount)
+            dbFunctions.update_database(self.information.get('id'), "paidAmount", newPaidAmount)
         if old_4k != new_4k:
-            update_database(self.information.get('id'), "4k", new_4k)
+            dbFunctions.update_database(self.information.get('id'), "4k", new_4k)
 
         # Send Discord message if Discord user details are available
         subject = config.get(f"discord", {}).get('moveSubject')
         body = config.get(f"discord", {}).get('moveBody')
         body = body.format(primaryEmail=email, server=new_server, section_names=section_names)
         if discord_user_id:
-            await send_discord_message(to_user=discord_user_id, subject=subject, body=body)
+            await discordFunctions.send_discord_message(to_user=discord_user_id, subject=subject, body=body)
         # Send Email Msg to user
         send_email(config_location, subject, body, email)
 
@@ -636,7 +405,7 @@ class PaymentMethodView(View):
 class PaymentMethodSelector(Select):
     def __init__(self, information):
         self.information = information
-        config = get_config(config_location)
+        config = configFunctions.get_config(config_location)
         payment_methods = config.get('PaymentMethod', [])
         options = [
             discord.SelectOption(label=method, value=method)
@@ -662,7 +431,7 @@ class ServerView(View):
 class ServerSelector(Select):
     def __init__(self, information):
         self.information = information
-        config = get_config(config_location)
+        config = configFunctions.get_config(config_location)
         server_names = [
             config[key].get('serverName', None)
             for key in config.keys() if key.startswith('PLEX-')
@@ -711,7 +480,7 @@ class FourKSelector(Select):
 
     async def handle_payment(self, interaction):
         server = self.information.get('server', '')
-        term_length = calculate_term_length(server, self.information['paidAmount'], self.information['4k'])
+        term_length = mathFunctions.calculate_term_length(server, self.information['paidAmount'], self.information['4k'])
         today = datetime.now().date()
         self.information['startDate'] = today.strftime('%Y-%m-%d')
         self.information['endDate'] = today + relativedelta(months=term_length)
@@ -749,7 +518,7 @@ class FourKSelector(Select):
 
     async def handle_new_user(self, interaction):
         server = self.information.get('server', '')
-        term_length = calculate_term_length(server, self.information['paidAmount'], self.information['4k'])
+        term_length = mathFunctions.calculate_term_length(server, self.information['paidAmount'], self.information['4k'])
         today = datetime.now().date()
         self.information['startDate'] = today.strftime('%Y-%m-%d')
         self.information['endDate'] = today + relativedelta(months=term_length)
@@ -1050,7 +819,7 @@ async def on_ready():
 @bot.tree.command(name="payment_received", description="Update user's paid amount and extend end date")
 @app_commands.describe(user="User identifier (Discord user, email address, or paymentPerson)", amount="Payment amount (float)")
 async def payment_received(ctx, *, user: str, amount: float):
-    search_results = find_user(user)
+    search_results = dbFunctions.find_user(user)
     if not search_results:
         await ctx.response.send_message(f"{ctx.user.name} No user found matching the given identifier: {user}")
         return
@@ -1069,7 +838,7 @@ async def add_new_user(ctx, *, discorduser: str = "none", email: str, payment_pe
 @bot.tree.command(name="move_user", description="Update user's plex libraries")
 @app_commands.describe(user="User identifier (Discord user, email address, or paymentPerson)", amount="Payment amount (float)")
 async def move_user(ctx, *, user: str, amount: float = None):
-    search_results = find_user(user)
+    search_results = dbFunctions.find_user(user)
     if not search_results:
         await ctx.response.send_message(f"No user found matching the given identifier: {user}", ephemeral=True)
         return
