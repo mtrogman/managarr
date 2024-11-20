@@ -60,29 +60,3 @@ def calculate_term_length(server, amount, is_4k):
 
     # If the remaining amount is still significant, then the payment does not exactly match any subscription plan
     return 0
-
-
-class PaymentMethodView(View):
-    def __init__(self, information):
-        super().__init__()
-        self.add_item(PaymentMethodSelector(information))
-
-
-class PaymentMethodSelector(Select):
-    def __init__(self, information):
-        self.information = information
-        config = configFunctions.get_config(config_location)
-        payment_methods = config.get('PaymentMethod', [])
-        options = [
-            discord.SelectOption(label=method, value=method)
-            for method in payment_methods
-        ]
-        options.append(discord.SelectOption(label="Cancel", value="cancel"))
-        super().__init__(placeholder="Please select the payment method", options=options, min_values=1)
-
-    async def callback(self, interaction: discord.Interaction):
-        if self.values[0] == "cancel":
-            await interaction.response.edit_message(content="Cancelled the request", view=None)
-            return
-        self.information['paymentMethod'] = self.values[0]
-        await interaction.response.edit_message(content="Select the Server", view=plexFunctions.ServerView(self.information))

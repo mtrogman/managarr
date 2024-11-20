@@ -9,6 +9,34 @@ import managarr
 config_location = "/config/config.yml"
 config = configFunctions.get_config(config_location)
 
+class UpdateSelector(Select):
+    def __init__(self, search_results, information):
+        self.search_results = search_results
+        self.information = information
+        max_options = 10
+        options = [
+            discord.SelectOption(
+                label=f"{user['paymentPerson']} | {user['server']} ({user['status']})",
+                value=str(idx),
+                description=f"Discord: {user['primaryDiscord'] if user['primaryDiscord'] else 'N/A'} | Email: {user['primaryEmail']}",
+                emoji="👤"
+            )
+            for idx, user in enumerate(search_results[:max_options])
+        ]
+        max_values = min(len(search_results), max_options)
+        super().__init__(placeholder="Please select the user", options=options, min_values=1, max_values=max_values)
+
+    async def callback(self, interaction: discord.Interaction):
+        selected_user_indices = [int(value) for value in self.values]
+        selected_users = [self.search_results[idx] for idx in selected_user_indices]
+        self.information.setdefault('users', []).extend(selected_users)
+
+        if self.information['what'] == 'payment':
+            await self.view.handle_payment(interaction, selected_users)
+        elif self.information['what'] == 'move':
+            await self.view.handle_move(interaction, selected_users)
+
+
 class ServerSelect(Select):
     def __init__(self, interaction, servers):
         server_options = [discord.SelectOption(label=server.name, value=server.name) for server in servers]
@@ -85,55 +113,6 @@ class StandardLibrarySelect(Select):
         await interaction.response.edit_message(content=confirmation_message, view=view)
 
 
-class ConfirmButtonsNewServer(View):
-    def __init__(self, interaction, selected_server, standard_library_titles, optional_library_titles_selected):
-        super().__init__()
-        correct_button = Button(style=discord.ButtonStyle.primary, label="Confirm")
-        correct_button.callback = self.correct_callback
-        self.add_item(correct_button)
-
-        cancel_button = Button(style=discord.ButtonStyle.danger, label="Cancel")
-        cancel_button.callback = self.cancel_callback
-        self.add_item(cancel_button)
-
-        self.interaction = interaction
-        self.selected_server = selected_server
-        self.standard_library_titles = standard_library_titles
-        self.optional_library_titles_selected = optional_library_titles_selected
-
-    async def correct_callback(self, interaction: discord.Interaction):
-        await self.interaction.delete_original_response()
-
-        base_url = self.selected_server.connections[0].uri
-        token = self.selected_server.accessToken
-
-        # Add the new Plex server to the config
-        new_server = {
-            'serverName': self.selected_server.name,
-            'baseUrl': base_url,
-            'token': token,
-            'standardLibraries': self.standard_library_titles,
-            'optionalLibraries': self.optional_library_titles_selected
-        }
-
-        config["PLEX-" + self.selected_server.name.replace(" ", "_")] = new_server
-
-        with open(config_location, 'w') as config_file:
-            yaml.dump(config, config_file)
-
-        await self.interaction.followup.send(content="Plex server added successfully!", ephemeral=True)
-
-    async def cancel_callback(self, interaction: discord.Interaction):
-        await self.interaction.delete_original_response()
-        await self.interaction.followup.send(content="Operation cancelled.", ephemeral=True)
-
-
-class ServerView(View):
-    def __init__(self, information):
-        super().__init__()
-        self.add_item(ServerSelector(information))
-
-
 class ServerSelector(Select):
     def __init__(self, information):
         self.information = information
@@ -155,12 +134,6 @@ class ServerSelector(Select):
             return
         self.information['server'] = self.values[0]
         await interaction.response.edit_message(content="Select the 4k", view=FourKView(self.information))
-
-
-class FourKView(View):
-    def __init__(self, information):
-        super().__init__()
-        self.add_item(FourKSelector(information))
 
 
 class FourKSelector(Select):
@@ -244,3 +217,58 @@ class FourKSelector(Select):
 
         confirmation_view = managarr.ConfirmButtonsNewUser(interaction, self.information)
         await interaction.response.edit_message(content=confirmation_message, view=confirmation_view)
+
+
+class PaymentMethodSelector(Select):
+    def __init__(self, information):
+        self.information = information
+        config = configFunctions.get_config(config_location)
+        payment_methods = config.get('PaymentMethod', [])
+        options = [
+            discord.SelectOption(label=method, value=method)
+            for method in payment_methods
+        ]
+        options.append(discord.SelectOption(label="Cancel", value="cancel"))
+        super().__init__(placeholder="Please select the payment method", options=options, min_values=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.values[0] == "cancel":
+            await interaction.response.edit_message(content="Cancelled the request", view=None)
+            return
+        self.information['paymentMethod'] = self.values[0]
+        await interaction.response.edit_message(content="Select the Server", view=plexFunctions.ServerView(self.information))
+
+
+class DiscordUserSelector(Select):
+    def __init__(self, information, ctx, discord_user):
+        self.information = information
+        options = []
+        if discord_user.lower() != "none":
+            guild = ctx.guild
+            if not guild:
+                ctx.response.edit_message("Command must be used in a guild/server.")
+                return
+            member = discord.utils.find(lambda m: m.name.lower() == discord_user.lower() or m.display_name.lower() == discord_user.lower(), guild.members)
+            if not member:
+                ctx.response.edit_message(f"User '{discord_user}' not found in the server.")
+                return
+            options.append(discord.SelectOption(label=member.name, value=member.id))
+        else:
+            options.append(discord.SelectOption(label="Not on Discord", value="N/A"))
+        options.append(discord.SelectOption(label="Cancel", value="cancel"))
+        super().__init__(placeholder="Please confirm Discord Username", options=options, min_values=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.values[0] == "cancel":
+            await interaction.response.edit_message(content="Cancelled the request", view=None)
+            return
+        if self.values[0] != "N/A":
+            selected_user_id = int(self.values[0])
+            selected_user = discord.utils.get(interaction.guild.members, id=selected_user_id)
+            if selected_user:
+                self.information['primaryDiscord'] = selected_user.name
+                self.information['primaryDiscordId'] = selected_user.id
+            else:
+                await interaction.response.send_message("Failed to find selected user, please try again.", ephemeral=True)
+                return
+        await interaction.response.edit_message(content="Select the payment method", view=mathFunctions.PaymentMethodView(self.information))
