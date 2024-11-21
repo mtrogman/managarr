@@ -149,7 +149,7 @@ class FourKSelector(Select):
             f"Term Length: {self.information.get('termLength')}\n"
         )
 
-        confirmation_view = managarr.ConfirmButtonsNewUser(interaction, self.information)
+        confirmation_view = viewFunctions.ConfirmButtonsNewUser(interaction, self.information)
         await interaction.response.edit_message(content=confirmation_message, view=confirmation_view)
 
     async def handle_move(self, interaction):
@@ -165,7 +165,7 @@ class FourKSelector(Select):
             f"End Date: {self.information.get('endDate')}\n"
         )
 
-        confirmation_view = managarr.ConfirmButtonsMoveUser(interaction, self.information)
+        confirmation_view = viewFunctions.ConfirmButtonsMoveUser(interaction, self.information)
         await interaction.response.edit_message(content=confirmation_message, view=confirmation_view)
 
     async def handle_new_user(self, interaction):
@@ -187,7 +187,7 @@ class FourKSelector(Select):
             f"Term Length: {self.information.get('termLength')}\n"
         )
 
-        confirmation_view = managarr.ConfirmButtonsNewUser(interaction, self.information)
+        confirmation_view = viewFunctions.ConfirmButtonsNewUser(interaction, self.information)
         await interaction.response.edit_message(content=confirmation_message, view=confirmation_view)
 
 
@@ -243,4 +243,4 @@ class DiscordUserSelector(Select):
             else:
                 await interaction.response.send_message("Failed to find selected user, please try again.", ephemeral=True)
                 return
-        await interaction.response.edit_message(content="Select the payment method", view=mathFunctions.PaymentMethodView(self.information))
+        await interaction.response.edit_message(content="Select the payment method", view=viewFunctions.PaymentMethodView(self.information))
