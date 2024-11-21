@@ -3,7 +3,7 @@ from plexapi.server import PlexServer
 from discord.ui import View, Button
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
-from modules import configFunctions, discordFunctions, dbFunctions, emailFunctions, selectFunctions
+from modules import configFunctions, discordFunctions, dbFunctions, emailFunctions, selectFunctions, sharedFunctions
 
 
 config_location = "/config/config.yml"
@@ -323,7 +323,7 @@ class UpdateSelectorView(View):
         super().__init__()
         self.search_results = search_results
         self.information = information
-        self.add_item(selectFunctions.UpdateSelector(search_results, information))
+        self.add_item(sharedFunctions.UpdateSelector(search_results, information))
 
     async def handle_payment(self, interaction, selected_users):
         user_count = len(self.information.get('users', []))

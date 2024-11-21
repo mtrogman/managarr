@@ -2,12 +2,11 @@ import discord, logging
 from discord import Embed
 from discord.ext import commands
 from modules import configFunctions
+from modules.globalBot import bot
 
 
 config_location = "/config/config.yml"
 config = configFunctions.get_config(config_location)
-
-bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
 
 
 async def add_role(user_id, role_name):

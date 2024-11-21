@@ -3,9 +3,10 @@ from plexapi.myplex import MyPlexAccount
 from discord import app_commands
 from discord.ext import commands
 from discord.ui import Select, View, Button
-from modules import dbFunctions, discordFunctions, configFunctions, mathFunctions, emailFunctions, selectFunctions
+from modules import globalBot, dbFunctions, discordFunctions, configFunctions, selectFunctions, viewFunctions
 
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
+globalBot.bot = bot
 
 # Set up logging to both console and file
 log_file = "/config/managarr.log"
@@ -45,7 +46,7 @@ async def payment_received(ctx, *, user: str, amount: float):
         await ctx.response.send_message(f"{ctx.user.name} No user found matching the given identifier: {user}")
         return
     information = {'what': 'payment', 'paymentAmount': amount}
-    await ctx.response.send_message("Select the correct user", view=UpdateSelectorView(search_results, information), ephemeral=True)
+    await ctx.response.send_message("Select the correct user", view=viewFunctions.UpdateSelectorView(search_results, information), ephemeral=True)
 
 
 @bot.tree.command(name="add_new_user", description="Add new user to DB")
@@ -64,7 +65,7 @@ async def move_user(ctx, *, user: str, amount: float = None):
         await ctx.response.send_message(f"No user found matching the given identifier: {user}", ephemeral=True)
         return
     information = {'what': 'move', 'paymentAmount': amount}
-    await ctx.response.send_message("Select the correct user", view=UpdateSelectorView(search_results, information), ephemeral=True)
+    await ctx.response.send_message("Select the correct user", view=viewFunctions.UpdateSelectorView(search_results, information), ephemeral=True)
 
 
 # Bot command to add a new Plex server
