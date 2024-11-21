@@ -1,4 +1,3 @@
-import math
 from modules import configFunctions
 
 config_location = "/config/config.yml"

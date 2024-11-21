@@ -1,8 +1,6 @@
 # modules/dbFunctions.py
 
-import mysql.connector
-import logging
-import re
+import mysql.connector, logging, re
 from modules import configFunctions
 
 

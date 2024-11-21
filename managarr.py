@@ -1,11 +1,4 @@
-import sys
-import logging
-import discord
-import math
-import os
-from datetime import datetime
-from dateutil.relativedelta import relativedelta
-from plexapi.server import PlexServer
+import sys, logging, discord, os
 from plexapi.myplex import MyPlexAccount
 from discord import app_commands
 from discord.ext import commands

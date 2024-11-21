@@ -1,9 +1,8 @@
-import yaml
 import discord
 from discord.ui import Select, View, Button
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
-from modules import configFunctions, mathFunctions
+from modules import configFunctions, mathFunctions, viewFunctions
 import managarr
 
 config_location = "/config/config.yml"
@@ -78,7 +77,7 @@ class OptionalLibrarySelect(Select):
             f"Optional Libraries: {', '.join(optional_library_titles_selected)}\n"
             "Confirm?"
         )
-        view = ConfirmButtonsNewServer(interaction, selected_server, standard_library_titles, optional_library_titles_selected)
+        view = viewFunctions.ConfirmButtonsNewServer(interaction, selected_server, standard_library_titles, optional_library_titles_selected)
         await interaction.response.edit_message(content=confirmation_message, view=view)
 
 
@@ -109,7 +108,7 @@ class StandardLibrarySelect(Select):
             f"Optional Libraries: {', '.join(optional_library_titles_selected)}\n"
             "Confirm?"
         )
-        view = ConfirmButtonsNewServer(interaction, selected_server, standard_library_titles, optional_library_titles_selected)
+        view = viewFunctions.ConfirmButtonsNewServer(interaction, selected_server, standard_library_titles, optional_library_titles_selected)
         await interaction.response.edit_message(content=confirmation_message, view=view)
 
 
@@ -133,7 +132,7 @@ class ServerSelector(Select):
             await interaction.response.edit_message(content="Cancelled the request", view=None)
             return
         self.information['server'] = self.values[0]
-        await interaction.response.edit_message(content="Select the 4k", view=FourKView(self.information))
+        await interaction.response.edit_message(content="Select the 4k", view=viewFunctions.FourKView(self.information))
 
 
 class FourKSelector(Select):
@@ -236,7 +235,7 @@ class PaymentMethodSelector(Select):
             await interaction.response.edit_message(content="Cancelled the request", view=None)
             return
         self.information['paymentMethod'] = self.values[0]
-        await interaction.response.edit_message(content="Select the Server", view=plexFunctions.ServerView(self.information))
+        await interaction.response.edit_message(content="Select the Server", view=viewFunctions.ServerView(self.information))
 
 
 class DiscordUserSelector(Select):

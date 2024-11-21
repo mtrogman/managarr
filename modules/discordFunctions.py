@@ -1,9 +1,7 @@
-import discord
-import logging
-from discord import app_commands, Embed
+import discord, logging
+from discord import Embed
 from discord.ext import commands
-from discord.ui import Select, View, Button
-from modules import configFunctions, mathFunctions
+from modules import configFunctions
 
 
 config_location = "/config/config.yml"
