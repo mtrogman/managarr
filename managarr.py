@@ -7,7 +7,7 @@ from modules import globalBot
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
 globalBot.bot = bot
 
-from modules import dbFunctions, discordFunctions, configFunctions, selectFunctions, viewFunctions
+from modules import dbFunctions, discordFunctions, configFunctions
 
 
 # Set up logging to both console and file
@@ -49,15 +49,15 @@ async def payment_received(ctx, *, user: str, amount: float):
         await ctx.followup.send(f"{ctx.user.name} No user found matching the given identifier: {user}")
         return
     information = {'what': 'payment', 'paymentAmount': amount}
-    await ctx.followup.send("Select the correct user", view=viewFunctions.UpdateSelectorView(search_results, information), ephemeral=True)
+    await ctx.followup.send("Select the correct user", view=discordFunctions.UpdateSelectorView(search_results, information), ephemeral=True)
 
 
 @bot.tree.command(name="add_new_user", description="Add new user to DB")
 @app_commands.describe(discorduser="Discord Username; Put none or na if user not on Discord", email="User email address", payment_person="The name on the payment", amount="Payment amount (float)")
 async def add_new_user(ctx, *, discorduser: str = "none", email: str, payment_person: str, amount: float):
-    await ctx.response.defer(ephemeral=True)
+    # await ctx.response.defer(ephemeral=True)
     information = {'what': 'newuser', 'primaryEmail': email, 'paidAmount': amount, 'paymentPerson': payment_person}
-    await ctx.followup.send("Confirm Discord User", view=viewFunctions.DiscordUserView(information, ctx, discorduser), ephemeral=True)
+    await ctx.followup.send("Confirm Discord User", view=discordFunctions.DiscordUserView(information, ctx, discorduser), ephemeral=True)
 
 
 # Bot command to "Change a user's subscription (change server or add/remove 4k library)"
@@ -70,7 +70,7 @@ async def move_user(ctx, *, user: str, amount: float = None):
         await ctx.followup.send(f"No user found matching the given identifier: {user}", ephemeral=True)
         return
     information = {'what': 'move', 'paymentAmount': amount}
-    await ctx.followup.send("Select the correct user", view=viewFunctions.UpdateSelectorView(search_results, information), ephemeral=True)
+    await ctx.followup.send("Select the correct user", view=discordFunctions.UpdateSelectorView(search_results, information), ephemeral=True)
 
 
 # Bot command to add a new Plex server
@@ -93,7 +93,7 @@ async def add_plex_server(ctx, *, email: str, password: str):
         return
 
     view = View()
-    view.add_item(selectFunctions.ServerSelect(ctx, servers))
+    view.add_item(discordFunctions.ServerSelect(ctx, servers))
     await ctx.followup.send("Choose a Plex server:", view=view, ephemeral=True)
 
 
