@@ -2,11 +2,13 @@ import sys, logging, discord, os
 from plexapi.myplex import MyPlexAccount
 from discord import app_commands
 from discord.ext import commands
-from discord.ui import Select, View, Button
-from modules import globalBot, dbFunctions, discordFunctions, configFunctions, selectFunctions, viewFunctions
-
+from discord.ui import View
+from modules import globalBot
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
 globalBot.bot = bot
+
+from modules import dbFunctions, discordFunctions, configFunctions, selectFunctions, viewFunctions
+
 
 # Set up logging to both console and file
 log_file = "/config/managarr.log"

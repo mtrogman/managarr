@@ -1,12 +1,18 @@
+from modules.globalBot import bot
 import discord, logging
 from discord import Embed
 from discord.ext import commands
 from modules import configFunctions
-from modules.globalBot import bot
 
 
 config_location = "/config/config.yml"
 config = configFunctions.get_config(config_location)
+
+
+if bot is None:
+    logging.error("The bot instance in globalBot is None!")
+else:
+    logging.info("The bot instance in globalBot is set correctly.")
 
 
 async def add_role(user_id, role_name):
@@ -39,11 +45,20 @@ async def add_role(user_id, role_name):
 
 
 async def send_discord_message(to_user, subject, body):
-    user = await bot.fetch_user(to_user)
-    embed = Embed(title=f"**{subject}**", description=body, color=discord.Colour.blue())
+    if bot is None:
+        logging.error("The bot instance in globalBot is None!")
+        return
+
+    if not bot.is_ready():
+        logging.error("The bot is not ready yet!")
+        return
+
+    logging.info(f"Attempting to fetch user {to_user} with bot: {bot}")
     try:
+        user = await bot.fetch_user(to_user)
+        embed = discord.Embed(title=f"**{subject}**", description=body, color=discord.Colour.blue())
         await user.send(embed=embed)
     except discord.errors.Forbidden as e:
-        logging.warning(f"Failed to send message to {user.name}#{user.discriminator}: {e}")
+        logging.warning(f"Failed to send message to {to_user}: {e}")
     except Exception as e:
-        logging.error(f"An unexpected error occurred for {user.name}: {e}")
+        logging.error(f"An unexpected error occurred: {e}")
