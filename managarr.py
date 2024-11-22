@@ -55,7 +55,7 @@ async def payment_received(ctx, *, user: str, amount: float):
 @bot.tree.command(name="add_new_user", description="Add new user to DB")
 @app_commands.describe(discorduser="Discord Username; Put none or na if user not on Discord", email="User email address", payment_person="The name on the payment", amount="Payment amount (float)")
 async def add_new_user(ctx, *, discorduser: str = "none", email: str, payment_person: str, amount: float):
-    # await ctx.response.defer(ephemeral=True)
+    await ctx.response.defer(ephemeral=True)
     information = {'what': 'newuser', 'primaryEmail': email, 'paidAmount': amount, 'paymentPerson': payment_person}
     await ctx.followup.send("Confirm Discord User", view=discordFunctions.DiscordUserView(information, ctx, discorduser), ephemeral=True)
 
