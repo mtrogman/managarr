@@ -450,6 +450,8 @@ class ConfirmButtonsNewUser(View):
             logging.exception(e)
 
         dbFunctions.create_user(self.information)
+        dbFunctions.log_transaction(information=self.information)
+
         followup_message += (
             f"Discord: {discord_user}\n"
             f"Email: {email}\n"
@@ -582,6 +584,7 @@ class ConfirmButtonsMoveUser(View):
         if self.information['paymentAmount'] is not None:
             newPaidAmount = float(self.information['paidAmount']) + float(self.information['paymentAmount'])
             dbFunctions.update_database(self.information.get('id'), "paidAmount", newPaidAmount)
+            dbFunctions.log_transaction(information=self.information)
         if old_4k != new_4k:
             dbFunctions.update_database(self.information.get('id'), "4k", new_4k)
 
