@@ -1,6 +1,7 @@
 # modules/dbFunctions.py
 
 import mysql.connector, logging, re
+from datetime import datetime
 from modules import configFunctions
 
 
@@ -113,3 +114,41 @@ def update_database(user_id, field, value):
         if connection.is_connected():
             cursor.close()
             connection.close()
+
+
+def log_transaction(information):
+    try:
+        connection = create_connection()
+        if connection:
+            cursor = connection.cursor()
+
+            # Loop through each user in the information's "users" list
+            for user in information.get('users', []):
+                # Extract data for each user
+                description = information.get('what', 'Transaction')  # General description
+                entity_id = user.get('primaryEmail', 'general_cost')  # Email or 'general_cost'
+                amount = user.get('newPaidAmount', 0.00)  # Payment amount
+                payment_method = user.get('paymentMethod', 'Unknown')  # Payment method
+                if description == "payment":
+                    term_length = user.get('term_length', "") + "Months"
+                    notes = f"Server: {user.get('server')} | Length: {term_length}"
+
+                # SQL query to insert a new transaction
+                insert_query = """
+                INSERT INTO transactions (description, entity_id, amount, payment_method, notes)
+                VALUES (%s, %s, %s, %s, %s)
+                """
+                cursor.execute(insert_query, (description, entity_id, amount, payment_method, notes))
+
+                # Log success for each user
+                logging.info(f"Logged transaction for {entity_id} with amount: {amount}")
+
+            # Commit all changes after the loop
+            connection.commit()
+    except mysql.connector.Error as e:
+        logging.error(f"Error logging transactions: {e}")
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+

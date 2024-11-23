@@ -368,6 +368,7 @@ class ConfirmButtonsPayment(View):
             dbFunctions.update_database(user_id, "startDate", new_start_date)
             dbFunctions.update_database(user_id, "endDate", new_end_date)
             dbFunctions.update_database(user_id, "status", "Active")
+            dbFunctions.log_transaction(information=self.information)
 
             followup_message += (
                 "---------------------\n"
@@ -670,7 +671,7 @@ class UpdateSelectorView(View):
                     today = datetime.today().date()
                     user['newStartDate'] = today
                 user['newEndDate'] = user['newStartDate'] + relativedelta(months=term_length)
-
+                user['term_length'] = term_length
                 confirmation_message += (
                     "---------------------\n"
                     f"Primary Email: {user.get('primaryEmail')}\n"
