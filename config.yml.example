@@ -3,7 +3,9 @@ discord:
   guildId: PUT_YOUR_GUILD_ID_HERE
   channelId: PUT_CHANNEL_WHERE_BOT_CAN_PRIVATELY_TALK_TO_YOU
   paymentSubject: "<YOUR NAME>'s Plex Subscription Renewed"
-  paymentBody: "Dear User,\n\nYour subscription for email: {primaryEmail} has been extended on {server} with access to the following libraries: {section_names}.  Your new end date is: {newEndDate}.\n\n Enjoy!  If you have any questions or issues  please reply to this email or contac <YOUR NAME> on Discord (https://discord.gg/XXXXXXXX).\n\nBest regards,\n<YOUR NAME>"
+  paymentBody: "Dear User,\n\nYour subscription for email: {primaryEmail} has been extended on {server} with access to the following libraries: {section_names}. Your new end date is: {newEndDate}.\n\nEnjoy! If you have any questions or issues, please reply to this email or contact <YOUR NAME> on Discord (https://discord.gg/XXXXXXXX).\n\nBest regards,\n<YOUR NAME>"
+  moveSubject: "<YOUR NAME>'s Plex Subscription Updated"
+  moveBody: "Dear User,\n\nYour subscription for email: {primaryEmail} has been successfully moved to a new Plex instance:\n\nPlex Server: {server}\nLibraries: {section_names}\n\nEnjoy your updated experience! If you have any questions or issues, please reply to this email or contact <YOUR NAME> on Discord (https://discord.gg/XXXXXXXX).\n\nBest regards,\n<YOUR NAME>"
 
 database:
   database: media_mgmt

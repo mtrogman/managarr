@@ -2,7 +2,7 @@
 
 # managarr
 
-A Discord bot to add/update users on plex and discord with subscription updates like: became paying member, updates to subscription model, and payment updates.
+Managarr is a Discord bot designed to streamline the management of Plex subscriptions. It automates tasks such as adding new users, handling payments, moving users between Plex servers, and managing subscription notifications. Built with Python and leveraging the Discord API, Managarr aims to save time and reduce manual intervention.
 
 [![Release](https://img.shields.io/github/v/release/mtrogman/managarr?color=yellow&include_prereleases&label=version&style=flat-square)](https://github.com/mtrogman/managarr/releases)
 [![Docker](https://img.shields.io/docker/pulls/mtrogman/managarr?style=flat-square)](https://hub.docker.com/r/mtrogman/managarr)
@@ -15,12 +15,44 @@ A Discord bot to add/update users on plex and discord with subscription updates 
 
 # Features
 
-managarr uses discord in conjunction with MariaDB, Plex, and Discord to manage users subscriptions.
+- Add New Users: Quickly add new Plex users via Discord with minimal manual steps.
+- Payments: Track and update subscriptions when payments are received, extending user access automatically.
+- Move Users: Seamlessly transfer users between Plex instances while keeping their subscriptions intact.
+- Multiple Medium Notifications: Users are notified through Discord and email for critical updates.
 
 # Commands
 
-/payment_recieved [User] [Amount]
-    This cmd will use [User] and search for it in primaryDiscord, paymentPerson, primaryEmail and return all matches.  Once you select the user(s) it will calculate the amount based off the values in the config and [Amount].  It will calculate the new end date for the user and also increment the paidAmount of the user to match the amount recieved.  If the payment amount matches one of the dicount points (3/6/12 Months) it calculates the paid months by that number, if it doesnt match one of those values it defaults to 1 month and calculates payment off that price and extends users subscription by the amount of months that the payment covers.  If the payment doesnt cleanly add up the extra amount is also added to the users payment.
+/payment_received [User] [Amount]
+Handles subscription payments for a user:
+
+- Searches for the specified [User] in fields such as primaryDiscord, paymentPerson, and primaryEmail, returning all matches.
+- After selecting the user(s), calculates the subscription extension based on the [Amount] paid:
+    - Uses values from the configuration (e.g., pricing for 1, 3, 6, or 12 months).
+    - If the payment amount matches a discount point, it applies the corresponding duration (e.g., 3 months for a 3-month payment).
+    - For payments that don’t cleanly match, the bot defaults to 1 month and carries over any extra amount as credit.
+- Updates the user’s paidAmount and extends their subscription end date.
+
+/add_new_user [User]
+Adds a new user to the system:
+
+- Searches for the specified [User] in Discord and retrieves relevant user details.
+- Prompts for confirmation before adding the user to the database.
+- Automatically assigns them the correct Discord role and updates their status.
+
+/move_user [User] [New_Server]
+Transfers a user to a different Plex server:
+
+- Updates the user’s subscription to reflect the libraries on the new Plex server.
+- Ensures their subscription details, such as end date and access permissions, remain intact.
+- Notifies the user of the change via Discord and email.
+
+
+/add_plex_server [Server_Name]
+Adds a new Plex server to the system configuration:
+
+- Registers the new server with its name, token, and associated libraries.
+- Updates the bot configuration to recognize the new server for user management and subscriptions.
+- Useful for scaling and managing multiple Plex instances
 
 # Installation and setup
 
