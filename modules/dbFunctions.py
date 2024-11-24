@@ -127,7 +127,7 @@ def log_transaction(information):
                 # Extract data for each user
                 description = information.get('what', 'Transaction')  # General description
                 entity_id = user.get('primaryEmail', 'general_cost')  # Email or 'general_cost'
-                amount = user.get('newPaidAmount', 0.00)  # Payment amount
+                amount = user.get('paymentAmount', 0.00)  # Payment amount
                 payment_method = user.get('paymentMethod', 'Unknown')  # Payment method
                 if description == "payment":
                     term_length = user.get('term_length', "") + "Months"
