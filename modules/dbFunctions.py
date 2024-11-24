@@ -130,7 +130,7 @@ def log_transaction(information):
                 amount = user.get('newPaidAmount', 0.00)  # Payment amount
                 payment_method = user.get('paymentMethod', 'Unknown')  # Payment method
                 if description == "payment":
-                    term_length = user.get('term_length', "") + "Months"
+                    term_length = str(user.get('term_length', "")) + " Months"
                     notes = f"Server: {user.get('server')} | Length: {term_length}"
 
                 # SQL query to insert a new transaction
