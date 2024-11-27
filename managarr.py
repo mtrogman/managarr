@@ -48,7 +48,7 @@ async def payment_received(ctx, *, user: str, amount: float):
     if not search_results:
         await ctx.followup.send(f"{ctx.user.name} No user found matching the given identifier: {user}")
         return
-    information = {'what': 'payment', 'paymentAmount': amount}
+    information = {'what': 'payment', 'paidAmount': amount}
     await ctx.followup.send("Select the correct user", view=discordFunctions.UpdateSelectorView(search_results, information), ephemeral=True)
 
 
@@ -69,7 +69,7 @@ async def move_user(ctx, *, user: str, amount: float = None):
     if not search_results:
         await ctx.followup.send(f"No user found matching the given identifier: {user}", ephemeral=True)
         return
-    information = {'what': 'move', 'paymentAmount': amount}
+    information = {'what': 'move', 'paidAmount': amount}
     await ctx.followup.send("Select the correct user", view=discordFunctions.UpdateSelectorView(search_results, information), ephemeral=True)
 
 
