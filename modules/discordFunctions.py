@@ -581,8 +581,8 @@ class ConfirmButtonsMoveUser(View):
 
         if new_server != old_server:
             dbFunctions.update_database(self.information.get('id'), "server", new_server)
-        if self.information['paymentAmount'] is not None:
-            newPaidAmount = float(self.information['paidAmount']) + float(self.information['paymentAmount'])
+        if self.information['paidAmount'] is not None:
+            newPaidAmount = float(self.information['paidAmount']) + float(self.information['users'][0]['paidAmount'])
             dbFunctions.update_database(self.information.get('id'), "paidAmount", newPaidAmount)
             dbFunctions.log_transaction(information=self.information)
         if old_4k != new_4k:
@@ -638,7 +638,7 @@ class UpdateSelectorView(View):
                 total_prices['12Month'] += pricing_section['12Month']
                 user['prices'] = pricing_section
 
-            total_amount = self.information['paymentAmount']
+            total_amount = self.information['paidAmount']
             matching_lengths = [key for key, value in total_prices.items() if value == total_amount]
             not_rounded = True
             each_extra_balance = 0
@@ -700,7 +700,6 @@ class UpdateSelectorView(View):
         self.information['startDate'] = selected_users[0].get('startDate')
         self.information['endDate'] = selected_users[0].get('endDate')
         self.information['status'] = selected_users[0].get('status')
-        self.information['paidAmount'] = selected_users[0].get('paidAmount')
         self.information['id'] = selected_users[0].get('id')
         self.information['primaryDiscordId'] = selected_users[0].get('primaryDiscordId')
 

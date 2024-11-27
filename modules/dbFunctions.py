@@ -121,27 +121,37 @@ def log_transaction(information):
         connection = create_connection()
         if connection:
             cursor = connection.cursor()
-
             # Loop through each user in the information's "users" list
-            for user in information.get('users', []):
-                # Extract data for each user
-                description = information.get('what', 'Transaction')  # General description
-                entity_id = user.get('primaryEmail', 'general_cost')  # Email or 'general_cost'
-                amount = user.get('paymentAmount', 0.00)  # Payment amount
-                payment_method = user.get('paymentMethod', 'Unknown')  # Payment method
-                if description == "payment":
-                    term_length = str(user.get('term_length', "")) + " Months"
-                    notes = f"Server: {user.get('server')} | Length: {term_length}"
+            description = information.get('what', 'Transaction')  # General description
+            amount = information.get('paidAmount')
 
-                # SQL query to insert a new transaction
-                insert_query = """
-                INSERT INTO transactions (description, entity_id, amount, payment_method, notes)
-                VALUES (%s, %s, %s, %s, %s)
-                """
-                cursor.execute(insert_query, (description, entity_id, amount, payment_method, notes))
+            if description == "payment":
+                for user in information.get('users', []):
+                    # Extract data for each user
+                    entity_id = user.get('primaryEmail', 'Unknown')
+                    payment_method = user.get('paymentMethod', 'Unknown')
 
-                # Log success for each user
-                logging.info(f"Logged transaction for {entity_id} with amount: {amount}")
+                term_length = str(user.get('term_length', "")) + " Months"
+                notes = f"Server: {user.get('server')} | 4k: {user.get('4k')} | Length: {term_length}"
+            elif description == "move":
+                for user in information.get('users', []):
+                    entity_id = user.get('primaryEmail', 'Unknown')
+                    payment_method = user.get('paymentMethod', 'Unknown')
+                    notes = f"Server: {user.get('server')}"
+            elif description == "newuser":
+                entity_id = information.get('primaryEmail', 'Unknown')
+                payment_method = information.get('paymentMethod', 'Unknown')
+                notes = f"Server: {information.get('server')} | 4k: {information.get('4k')} | Length: {information.get('termLength')}"
+
+            # SQL query to insert a new transaction
+            insert_query = """
+            INSERT INTO transactions (description, entity_id, amount, payment_method, notes)
+            VALUES (%s, %s, %s, %s, %s)
+            """
+            cursor.execute(insert_query, (description, entity_id, amount, payment_method, notes))
+
+            # Log success for each user
+            logging.info(f"Logged transaction for {entity_id} with amount: {amount}")
 
             # Commit all changes after the loop
             connection.commit()
