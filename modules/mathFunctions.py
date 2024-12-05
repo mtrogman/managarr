@@ -24,10 +24,11 @@ def calculate_term_length(server, amount, is_4k):
         return 1
 
     # Check if the amount covers multiple years
-    if amount > twelve_month_price:
-        years_paid_for = amount / twelve_month_price
-        if years_paid_for.is_integer():
-            return int(years_paid_for * 12)  # Convert years to months
+    if twelve_month_price != 0:
+        if amount > twelve_month_price:
+            years_paid_for = amount / twelve_month_price
+            if years_paid_for.is_integer():
+                return int(years_paid_for * 12)  # Convert years to months
 
     # Mixed payment scenario: Iteratively calculate possible month combinations
     term_length = 0
