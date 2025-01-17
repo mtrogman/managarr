@@ -1,3 +1,5 @@
+# modules/discordFunctions.py
+
 import discord, logging, math, yaml
 from modules.globalBot import bot
 from discord.ui import Select
