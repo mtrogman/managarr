@@ -64,33 +64,81 @@ def create_user(information):
 
 
 def find_user(search_term):
-    search_term = search_term.lower()
+    import re, logging, mysql.connector
+    search_term_raw = str(search_term or "").strip()
+    search_term = search_term_raw.lower()
+
+    # Recognize:
+    #  • email/name/discord handle (LIKE search)
+    #  • Discord mention <@123> / <@!123>
+    #  • plain numeric Discord ID
+    #  • explicit DB id via "id:123"
+    mention_id = None
+    user_id_exact = None
+
+    m = re.match(r"\s*<@!?(\d{5,25})>\s*$", search_term_raw)
+    if m:
+        mention_id = m.group(1)
+    if not mention_id and re.fullmatch(r"\d{5,25}", search_term_raw):
+        mention_id = search_term_raw
+    m2 = re.match(r"\s*id\s*:\s*(\d+)\s*$", search_term_raw, flags=re.IGNORECASE)
+    if m2:
+        user_id_exact = int(m2.group(1))
+
+    # Fast path: DB user id
+    try:
+        if user_id_exact is not None:
+            connection = create_connection()
+            if connection:
+                cursor = connection.cursor(dictionary=True)
+                cursor.execute("SELECT * FROM users WHERE id = %s", (user_id_exact,))
+                row = cursor.fetchone()
+                cursor.close(); connection.close()
+                if row:
+                    return [row]
+    except Exception as e:
+        logging.error(f"Error searching by explicit user id {user_id_exact}: {e}")
+
+    # Fast path: Discord ID (primary/secondary)
+    try:
+        if mention_id:
+            connection = create_connection()
+            if connection:
+                cursor = connection.cursor(dictionary=True)
+                cursor.execute(
+                    "SELECT * FROM users WHERE primaryDiscordId = %s OR secondaryDiscordId = %s",
+                    (mention_id, mention_id)
+                )
+                row = cursor.fetchone()
+                cursor.close(); connection.close()
+                if row:
+                    return [row]
+    except Exception as e:
+        logging.error(f"Error searching by discord id {mention_id}: {e}")
+
+    # Fallback: LIKE across common identity columns (case-insensitive)
     columns = ['primaryEmail', 'secondaryEmail', 'primaryDiscord', 'secondaryDiscord', 'paymentPerson']
     matching_rows_list = []
-    email_regex = r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}$'
 
     for column in columns:
         try:
             connection = create_connection()
             if connection:
                 cursor = connection.cursor(dictionary=True)
-                is_email_field = re.search(email_regex, column.lower())
-                if is_email_field:
-                    query = f"SELECT * FROM users WHERE LOWER({column}) LIKE %s AND {column} REGEXP %s"
-                    cursor.execute(query, ('%' + search_term + '%', email_regex))
-                else:
-                    query = f"SELECT * FROM users WHERE LOWER({column}) LIKE %s"
-                    cursor.execute(query, ('%' + search_term + '%',))
-                matching_rows = cursor.fetchall()
-                for row in matching_rows:
+                query = f"SELECT * FROM users WHERE LOWER({column}) LIKE %s"
+                cursor.execute(query, ('%' + search_term + '%',))
+                for row in cursor.fetchall():
                     if row not in matching_rows_list:
                         matching_rows_list.append(row)
         except mysql.connector.Error as e:
             logging.error(f"Error searching for users: {e}")
         finally:
-            if connection.is_connected():
-                cursor.close()
-                connection.close()
+            try:
+                if connection and connection.is_connected():
+                    cursor.close()
+                    connection.close()
+            except Exception:
+                pass
 
     return matching_rows_list
 
@@ -162,3 +210,27 @@ def log_transaction(information):
             cursor.close()
             connection.close()
 
+def get_user_by_id(user_id: int):
+    """Return a single user row (dict) by primary id, or None."""
+    connection = None
+    cursor = None
+    try:
+        connection = create_connection()
+        if not connection:
+            logging.error("Database connection is not available.")
+            return None
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+        row = cursor.fetchone()
+        return row
+    except mysql.connector.Error as e:
+        logging.error(f"Error fetching user by id {user_id}: {e}")
+        return None
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+            if connection and connection.is_connected():
+                connection.close()
+        except Exception:
+            pass

@@ -26,6 +26,40 @@ PaymentMethod:
   - Venmo
   - Cash
 
+promotions:
+  enabled: true
+  first_time_prices:
+    PLEX-XXXXXXXX:
+      1080p:
+        1Month: X.XX
+        3Month: X.XX
+        6Month: X.XX
+        12Month: X.XX
+      4k:
+        1Month: X.XX
+        3Month: X.XX
+        6Month: X.XX
+        12Month: X.XX
+    PLEX-YYYYYYYYY:
+      1080p:
+        1Month: X.XX
+        3Month: X.XX
+        6Month: X.XX
+        12Month: X.XX
+      4k:
+        1Month: X.XX
+        3Month: X.XX
+        6Month: X.XX
+        12Month: X.XX
+
+referrals:
+  enabled: true
+  rewards_by_months:
+    "1": 7
+    "3": 14
+    "6": 30
+    "12": 60
+
 PLEX-YYYYYYYYY:
   serverName: YYYYYYYYY
   baseUrl: https://XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX:32400
@@ -36,6 +70,7 @@ PLEX-YYYYYYYYY:
   - TV Shows
   optionalLibraries:
   - Movies 4k
+  - TV Shows 4k
   1080p:
     1Month: X.XX
     3Month: X.XX
@@ -62,7 +97,7 @@ PLEX-XXXXXXXX:
     6Month: X.XX
     12Month: X.XX
   4k:
-   1Month: X.XX
-   3Month: X.XX
-   6Month: X.XX
-   12Month: X.XX
+    1Month: X.XX
+    3Month: X.XX
+    6Month: X.XX
+    12Month: X.XX
