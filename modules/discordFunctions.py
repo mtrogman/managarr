@@ -11,7 +11,7 @@ from modules import configFunctions, dbFunctions, emailFunctions, mathFunctions
 from modules.promotions import referral_reward_for_new_user_first_purchase
 
 # ---------------------- Config ----------------------
-config_location = "./config/config.yml"
+config_location = "/config/config.yml"
 config = configFunctions.get_config(config_location)
 dcfg = config.get("discord", {}) or {}
 
