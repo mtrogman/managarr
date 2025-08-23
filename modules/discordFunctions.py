@@ -108,7 +108,7 @@ class ServerSelect(Select):
                 servers_filtered.append(server)
 
         options = [discord.SelectOption(label=server.name, value=server.name) for server in servers_filtered] \
-                  if servers_filtered else [discord.SelectOption(label="No servers available", value="none")]
+            if servers_filtered else [discord.SelectOption(label="No servers available", value="none")]
 
         super().__init__(placeholder="Choose a server", min_values=1, max_values=1, options=options)
         self.interaction = interaction  # original command interaction
@@ -276,8 +276,10 @@ class RenewConfirmView(View):
             # Disable buttons right away (same bubble)
             try:
                 for child in self.children:
-                    try: child.disabled = True
-                    except Exception: pass
+                    try:
+                        child.disabled = True
+                    except Exception:
+                        pass
                 if getattr(interaction, "message", None):
                     await interaction.message.edit(view=self)
             except Exception:
@@ -415,6 +417,92 @@ class UpdateSelectorView(View):
             await _edit_same_message(interaction, content=f"The person for {picked_email} does not exist in DB.", view=None)
             return
 
+        # Branch for MOVE: do not require paidAmount; prompt for new server and 4K, then confirm
+        what = (info or {}).get('what', '').strip().lower()
+        if what == 'move':
+            # seed details for the move confirm step
+            self.information.update({
+                'what': 'move',
+                'id': user_to_update.get('id'),
+                'primaryEmail': user_to_update.get('primaryEmail'),
+                'old_server': user_to_update.get('server'),
+                'old_4k': user_to_update.get('4k'),
+                'endDate': user_to_update.get('endDate'),
+            })
+
+            # server picker
+            servers = [k.replace("PLEX-", "") for k in config.keys()
+                       if isinstance(k, str) and k.startswith("PLEX-")]
+            srv_sel = Select(
+                placeholder="Select the NEW server",
+                min_values=1, max_values=1,
+                options=[discord.SelectOption(label=s, value=s) for s in servers] or
+                        [discord.SelectOption(label="(no servers found)", value="__none__")]
+            )
+            view = View();
+            view.add_item(srv_sel)
+
+            async def on_srv(inter: discord.Interaction):
+                try:
+                    if not inter.response.is_done():
+                        await inter.response.defer_update()
+                except Exception:
+                    pass
+                if srv_sel.values[0] == "__none__":
+                    await _edit_same_message(inter, content="No servers available in config.", view=None)
+                    return
+                self.information['server'] = srv_sel.values[0]
+
+                # 4K picker
+                res_sel = Select(
+                    placeholder="4K access?",
+                    min_values=1, max_values=1,
+                    options=[
+                        discord.SelectOption(label="Yes (4K plan)", value="Yes"),
+                        discord.SelectOption(label="No (1080p only)", value="No"),
+                    ]
+                )
+                res_view = View();
+                res_view.add_item(res_sel)
+
+                async def on_res(inter2: discord.Interaction):
+                    try:
+                        if not inter2.response.is_done():
+                            await inter2.response.defer_update()
+                    except Exception:
+                        pass
+                    self.information['4k'] = "Yes" if res_sel.values[0] == "Yes" else "No"
+
+                    preview = (
+                        "Confirm move:\n"
+                        "---------------------\n"
+                        f"Email: {self.information.get('primaryEmail')}\n"
+                        f"Old Server: {self.information.get('old_server')}\n"
+                        f"Old 4k: {self.information.get('old_4k')}\n"
+                        "---------------------\n"
+                        f"New Server: {self.information.get('server')}\n"
+                        f"New 4k: {self.information.get('4k')}\n"
+                        f"Paid Amount: {self.information.get('paidAmount')}\n"
+                        f"End Date: {self.information.get('endDate')}\n"
+                        "Press **Correct** to apply or **Cancel** to abort."
+                    )
+                    confirm_view = ConfirmButtonsMoveUser(self.information)
+                    await _edit_same_message(inter2, content=preview, view=confirm_view)
+
+                res_sel.callback = on_res
+                await _edit_same_message(
+                    inter,
+                    content=f"Server selected: {self.information['server']}\n\nChoose resolution plan:",
+                    view=res_view
+                )
+
+            srv_sel.callback = on_srv
+            await _edit_same_message(
+                interaction,
+                content=f"Selected user: {self.information.get('primaryEmail')}\nPick the NEW server:",
+                view=view
+            )
+            return
         # Build preview
         paid_amount = info.get('paidAmount')
         if paid_amount is None:
@@ -443,9 +531,9 @@ class UpdateSelectorView(View):
             plan = (config.get(f"PLEX-{_server}", {}) or {}).get("4k" if _is_4k == "Yes" else "1080p", {}) or {}
             return {
                 12: float(plan.get("12Month") or 0),
-                6:  float(plan.get("6Month") or 0),
-                3:  float(plan.get("3Month") or 0),
-                1:  float(plan.get("1Month") or 0),
+                6: float(plan.get("6Month") or 0),
+                3: float(plan.get("3Month") or 0),
+                1: float(plan.get("1Month") or 0),
             }
         prices = _std_prices(server, is_4k)
         remaining = round(float(paid_amount), 2)
@@ -552,7 +640,8 @@ class DiscordUserView(View):
         options.append(discord.SelectOption(label="Cancel", value="cancel"))
 
         sel = discord.ui.Select(placeholder="Confirm Discord user", min_values=1, max_values=1, options=options)
-        view = View(); view.add_item(sel)
+        view = View();
+        view.add_item(sel)
 
         async def on_pick(inter: discord.Interaction):
             try:
@@ -582,7 +671,8 @@ class DiscordUserView(View):
             min_values=1, max_values=1,
             options=[discord.SelectOption(label=x, value=x) for x in pms]
         )
-        view = View(); view.add_item(pm)
+        view = View();
+        view.add_item(pm)
 
         async def on_pm(inter: discord.Interaction):
             try:
@@ -607,7 +697,8 @@ class DiscordUserView(View):
             min_values=1, max_values=1,
             options=[discord.SelectOption(label=s, value=s) for s in servers]
         )
-        view = View(); view.add_item(sel)
+        view = View();
+        view.add_item(sel)
 
         async def on_srv(inter: discord.Interaction):
             try:
@@ -631,7 +722,8 @@ class DiscordUserView(View):
             options=[discord.SelectOption(label="Yes (4K plan)", value="Yes"),
                      discord.SelectOption(label="No (1080p only)", value="No")]
         )
-        view = View(); view.add_item(res)
+        view = View();
+        view.add_item(res)
 
         async def on_res(inter: discord.Interaction):
             try:
@@ -810,7 +902,10 @@ class ConfirmButtonsNewUser(View):
 
             try:
                 self.information.setdefault('term_length', int(self.information.get('termLength') or 0))
-                dbFunctions.log_transaction(information=self.information)
+                info = dict(self.information)
+                if info.get('what') == 'move' and info.get('paidAmount') is None:
+                    info['paidAmount'] = 0.0
+                dbFunctions.log_transaction(information=info)
                 logging.info(f"Logged transaction for {email} with amount: {self.information.get('paidAmount')}")
             except Exception as e:
                 logging.info(f"log_transaction error: {e}")
@@ -975,8 +1070,10 @@ class ConfirmButtonsMoveUser(View):
             # Disable buttons
             try:
                 for child in self.children:
-                    try: child.disabled = True
-                    except Exception: pass
+                    try:
+                        child.disabled = True
+                    except Exception:
+                        pass
                 if getattr(interaction, "message", None):
                     await interaction.message.edit(view=self)
             except Exception:
@@ -994,7 +1091,11 @@ class ConfirmButtonsMoveUser(View):
             std_libs = (config.get(f"PLEX-{new_server}", {}) or {}).get('standardLibraries') or []
             opt_libs = (config.get(f"PLEX-{new_server}", {}) or {}).get('optionalLibraries') or []
             section_names = (std_libs + opt_libs) if (self.information.get('4k') == "Yes") else std_libs
-            old_section_names = (std_libs + opt_libs) if (self.information.get('old_4k') == "Yes") else std_libs
+            _old_srv = self.information.get('old_server')
+            _old_cfg = (config.get(f"PLEX-{_old_srv}", {}) or {})
+            _old_std = _old_cfg.get('standardLibraries') or []
+            _old_opt = _old_cfg.get('optionalLibraries') or []
+            old_section_names = (_old_std + _old_opt) if (self.information.get('old_4k') == "Yes") else _old_std
 
             plex_config = (config.get(f'PLEX-{new_server}', {}) or {})
             base_url = plex_config.get('baseUrl')
@@ -1022,7 +1123,10 @@ class ConfirmButtonsMoveUser(View):
                 dbFunctions.update_database(self.information.get('id'), "server", new_server)
                 dbFunctions.update_database(self.information.get('id'), "4k", new_4k)
                 try:
-                    dbFunctions.log_transaction(information=self.information)
+                    info = dict(self.information)
+                    if info.get('what') == 'move' and info.get('paidAmount') is None:
+                        info['paidAmount'] = 0.0
+                    dbFunctions.log_transaction(information=info)
                 except Exception as e:
                     logging.info(f"log_transaction skipped due to internal error: {e}")
             except Exception as e:
@@ -1049,3 +1153,223 @@ class ConfirmButtonsMoveUser(View):
         except Exception:
             pass
         await _edit_same_message(interaction, content="Cancelled the request.", view=None)
+
+def _round_up_50_cents(x: float) -> float:
+    # Always round UP to nearest $0.50
+    # e.g., 0.01->0.50, 0.50->0.50, 0.51->1.00
+    steps = math.ceil((x + 1e-9) / 0.50)
+    return round(steps * 0.50 + 0.0, 2)
+
+
+def _parse_date_yyyy_mm_dd_safe(s):
+    try:
+        return datetime.strptime(str(s), "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def _months_span(start: date, end: date) -> int:
+    """Return whole-month span (approximate plan length) between start and end using relativedelta."""
+    if not (start and end) or end <= start:
+        return 0
+    rd = relativedelta(end, start)
+    months = rd.years * 12 + rd.months
+    # Count near-full months if days are large
+    if rd.days >= 14:  # mid-month or more -> bump
+        months += 1
+    return max(1, months)
+
+
+def _tier_key_for_months(m: int) -> tuple[int, str]:
+    """
+    Map a month length to one of {1,3,6,12} by nearest.
+    Returns (months, tierKeyString) where tierKeyString is "1Month", "3Month", ...
+    """
+    candidates = [1, 3, 6, 12]
+    best = min(candidates, key=lambda c: abs(c - max(1, m)))
+    return best, f"{best}Month"
+
+
+def _price_for(server_name: str, is4k: str, tier_months: int) -> float:
+    plan_block = (config.get(f"PLEX-{server_name}", {}) or {}).get("4k" if is4k == "Yes" else "1080p", {}) or {}
+    key = f"{tier_months}Month"
+    try:
+        return float(plan_block.get(key) or 0.0)
+    except Exception:
+        return 0.0
+
+
+class CalculateMoveCostView(View):
+    """
+    Flow:
+      1) You pick a user (via build_calculate_move_view -> this view renders server picker)
+      2) We immediately display CURRENT subscription (server/4k/dates/tier)
+      3) You pick NEW server -> pick 4K -> we compute owed = (new-old) * remaining_fraction (rounded up $0.50)
+    """
+
+    def __init__(self, user_row: dict):
+        super().__init__(timeout=180.0)
+        self.user = user_row
+        self._picked_server = None
+
+        # Server select (new target)
+        servers = [k.replace("PLEX-", "") for k in config.keys() if isinstance(k, str) and k.startswith("PLEX-")]
+        srv = discord.ui.Select(
+            placeholder="Select the NEW server",
+            min_values=1, max_values=1,
+            options=[discord.SelectOption(label=s, value=s) for s in servers] or
+                    [discord.SelectOption(label="(no servers found)", value="__none__")]
+        )
+        srv.callback = self._on_server
+        self.add_item(srv)
+
+    async def start(self, interaction: discord.Interaction):
+        # Show current subscription immediately
+        start = _parse_date_yyyy_mm_dd_safe(self.user.get("startDate"))
+        end = _parse_date_yyyy_mm_dd_safe(self.user.get("endDate"))
+        today = datetime.now().date()
+
+        # Compute current tier based on start/end span
+        months = _months_span(start, end) if (start and end) else 0
+        tier_m, tier_key = _tier_key_for_months(months) if months else (0, "?")
+
+        # Lapsed / remaining
+        if start and end and end > start:
+            total_days = (end - start).days
+            elapsed = max(0, (today - start).days)
+            elapsed = min(elapsed, total_days)
+            lapsed_frac = (elapsed / total_days) if total_days else 1.0
+            remaining_frac = 1.0 - lapsed_frac
+            lapsed_pct = f"{lapsed_frac * 100:.1f}%"
+            remain_pct = f"{remaining_frac * 100:.1f}%"
+        else:
+            lapsed_pct = "n/a"
+            remain_pct = "n/a"
+
+        current_summary = (
+            "Move Cost Estimator\n"
+            "---------------------\n"
+            f"User: {self.user.get('primaryEmail')}\n"
+            f"Current: {self.user.get('server')} / {self.user.get('4k')}\n"
+            f"Start:   {self.user.get('startDate')}\n"
+            f"End:     {self.user.get('endDate')}\n"
+            f"Tier:    ~{tier_m} month(s)\n"
+            f"Lapsed:  {lapsed_pct}  (Remaining: {remain_pct})\n"
+            "---------------------\n"
+            "Now choose the NEW server below:"
+        )
+
+        await _edit_same_message(interaction, content=current_summary, view=self)
+
+    async def _on_server(self, interaction: discord.Interaction):
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer_update()
+        except Exception:
+            pass
+
+        sel = interaction.data.get("values", ["__none__"])[0] if hasattr(interaction, "data") else "__none__"
+        if sel == "__none__":
+            await _edit_same_message(interaction, content="No servers available in config.", view=None)
+            return
+
+        self._picked_server = sel
+
+        # 4K picker
+        res = discord.ui.Select(
+            placeholder="4K for NEW plan?",
+            min_values=1, max_values=1,
+            options=[discord.SelectOption(label="Yes (4K plan)", value="Yes"),
+                     discord.SelectOption(label="No (1080p only)", value="No")]
+        )
+        res.callback = self._on_resolution
+        v = View();
+        v.add_item(res)
+
+        await _edit_same_message(
+            interaction,
+            content=f"NEW server selected: {sel}\n\nChoose resolution for NEW plan:",
+            view=v
+        )
+
+    async def _on_resolution(self, interaction: discord.Interaction):
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer_update()
+        except Exception:
+            pass
+
+        new_4k = (interaction.data.get("values", [None])[0] if hasattr(interaction, "data") else None) or "No"
+
+        # Compute months (tier) from current start/end
+        start = _parse_date_yyyy_mm_dd_safe(self.user.get("startDate"))
+        end = _parse_date_yyyy_mm_dd_safe(self.user.get("endDate"))
+        today = datetime.now().date()
+
+        if not (start and end) or end <= start:
+            await _edit_same_message(interaction, content="User has invalid start/end dates; cannot estimate.",
+                                     view=None)
+            return
+
+        months = _months_span(start, end)
+        tier_m, _tier_key = _tier_key_for_months(months)
+
+        # Remaining fraction
+        total_days = (end - start).days
+        elapsed = max(0, (today - start).days)
+        elapsed = min(elapsed, total_days)
+        lapsed_frac = (elapsed / total_days) if total_days else 1.0
+        remaining_frac = 1.0 - lapsed_frac
+
+        # Prices at that same tier (old vs new)
+        old_server = self.user.get("server")
+        old_4k = self.user.get("4k")
+
+        old_price = _price_for(old_server, old_4k, tier_m)
+        new_price = _price_for(self._picked_server, new_4k, tier_m)
+
+        diff = max(0.0, new_price - old_price)  # clamp (no credits); change if you want credits
+        owed_raw = diff * remaining_frac
+        owed = _round_up_50_cents(owed_raw)
+
+        summary = (
+            "Move Cost Estimator\n"
+            "---------------------\n"
+            f"User: {self.user.get('primaryEmail')}\n"
+            f"Old:  {old_server} / {old_4k}\n"
+            f"New:  {self._picked_server} / {new_4k}\n"
+            "---------------------\n"
+            f"Start:  {start.strftime('%Y-%m-%d')}\n"
+            f"End:    {end.strftime('%Y-%m-%d')}\n"
+            f"Today:  {today.strftime('%Y-%m-%d')}\n"
+            f"Tier:   ~{tier_m} month(s)\n"
+            f"Lapsed: {lapsed_frac * 100:.1f}%  (Remaining: {remaining_frac * 100:.1f}%)\n"
+            "---------------------\n"
+            f"Old Tier Price: ${old_price:.2f}\n"
+            f"New Tier Price: ${new_price:.2f}\n"
+            f"Price Diff:     ${diff:.2f}\n"
+            "---------------------\n"
+            f"Estimated Amount Due now (rounded up to $0.50): **${owed:.2f}**\n"
+        )
+
+        await _edit_same_message(interaction, content=summary, view=None)
+
+
+def build_calculate_move_view(user_query: str) -> View | None:
+    """
+    Entry point for /calculate_move. Finds a single user; if multiple matches you can pass an exact email.
+    If exactly one is found, returns an interactive view that starts by showing CURRENT subscription.
+    """
+    results = dbFunctions.find_user(user_query) or []
+    if not results:
+        return None
+
+    # Prefer exact email match if present; else take first
+    def norm(s): return (s or "").strip().lower()
+
+    user_row = next(
+        (r for r in results if
+         norm(r.get("primaryEmail")) == norm(user_query) or norm(r.get("secondaryEmail")) == norm(user_query)),
+        results[0]
+    )
+    return CalculateMoveCostView(user_row)
