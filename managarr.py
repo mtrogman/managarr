@@ -194,7 +194,7 @@ async def add_new_user(ctx: discord.Interaction):
     await ctx.response.send_modal(AddNewUserModal(ctx))
 
 @bot.tree.command(name="move_user", description="Update user's plex libraries")
-@app_commands.describe(user="User identifier (Discord user, email address, or paymentPerson)", amount="Payment amount (float)")
+@app_commands.describe(user="User identifier (Discord user, email address, or paymentPerson)", amount="Payment amount (float, optional)")
 async def move_user(ctx, *, user: str, amount: float = None):
     await ctx.response.defer(ephemeral=True)
     search_results = dbFunctions.find_user(user)
@@ -224,6 +224,22 @@ async def add_plex_server(ctx, *, email: str, password: str):
     view = View()
     view.add_item(discordFunctions.ServerSelect(ctx, servers))
     await ctx.followup.send("Choose a Plex server:", view=view, ephemeral=True)
+
+@bot.tree.command(name="calculate_move", description="Estimate the pro-rated cost to move a user's plan to a new server/quality")
+@app_commands.describe(user="User identifier (Discord user, email address, or paymentPerson)")
+async def calculate_move(ctx, *, user: str):
+    await ctx.response.defer(ephemeral=True)
+    view = discordFunctions.build_calculate_move_view(user)
+    if view is None:
+        await ctx.followup.send(f"No user found matching: {user}", ephemeral=True)
+        return
+    # Send an anchor message and have the view render the current subscription immediately.
+    msg = await ctx.followup.send("Loading current subscription…", ephemeral=True, view=view)
+    # Kick off the view to overwrite the same message with the current subscription summary.
+    try:
+        await view.start(ctx)
+    except Exception:
+        pass
 
 # ---------------------- run ----------------------
 bot.run(bot_token)
