@@ -233,13 +233,7 @@ async def calculate_move(ctx, *, user: str):
     if view is None:
         await ctx.followup.send(f"No user found matching: {user}", ephemeral=True)
         return
-    # Send an anchor message and have the view render the current subscription immediately.
-    msg = await ctx.followup.send("Loading current subscription…", ephemeral=True, view=view)
-    # Kick off the view to overwrite the same message with the current subscription summary.
-    try:
-        await view.start(ctx)
-    except Exception:
-        pass
+    await ctx.followup.send("Pick the user:", ephemeral=True, view=view)
 
 # ---------------------- run ----------------------
 bot.run(bot_token)
