@@ -301,19 +301,36 @@ class RenewConfirmView(View):
                 server = user_to_update.get('server')
                 is_4k = user_to_update.get('4k')
 
+                # --- Capture old dates BEFORE updating DB ---
+                old_start_val = user_to_update.get('startDate')
+                if isinstance(old_start_val, datetime):
+                    old_start_date = old_start_val.date()
+                elif isinstance(old_start_val, str):
+                    try:
+                        old_start_date = datetime.strptime(old_start_val, '%Y-%m-%d').date()
+                    except Exception:
+                        old_start_date = None
+                else:
+                    old_start_date = old_start_val  # date or None
+                old_end_date = self.ctx.get("old_end_date")
+
                 # Update DB
                 dbFunctions.update_database(user_id, "startDate", start_date.strftime('%Y-%m-%d'))
                 dbFunctions.update_database(user_id, "endDate", new_end_date.strftime('%Y-%m-%d'))
                 dbFunctions.update_database(user_id, "status", "Active")
 
-                # Log (quiet fail)
+                # Log (quiet fail) + include old dates for downstream logger
                 info = dict(self.ctx.get("information") or {})
+                if not info.get('what'):
+                    info['what'] = 'renew'
                 info.setdefault('primaryEmail', user_to_update.get('primaryEmail') or "")
                 info.setdefault('server', server)
                 info.setdefault('4k', is_4k)
                 info.setdefault('paidAmount', paid_amount)
                 info.setdefault('term_length', term_length)
                 info.setdefault('termLength', term_length)
+                info['oldStartDate'] = old_start_date.strftime('%Y-%m-%d') if hasattr(old_start_date, 'strftime') else str(old_start_date or '')
+                info['oldEndDate'] = old_end_date.strftime('%Y-%m-%d') if hasattr(old_end_date, 'strftime') else str(old_end_date or '')
                 try:
                     dbFunctions.log_transaction(information=info)
                 except Exception as e:
@@ -339,7 +356,7 @@ class RenewConfirmView(View):
 
                 # Final moderator summary (overwrite same message)
                 old_end = self.ctx["old_end_date"]
-                old_end_str = old_end.strftime('%Y-%m-%d') if hasattr(old_end, "strftime") else str(old_end)
+                old_end_str2 = old_end.strftime('%Y-%m-%d') if hasattr(old_end, "strftime") else str(old_end)
                 followup = (
                     "---------------------\n"
                     f"Discord: {user_to_update.get('primaryDiscord')}\n"
@@ -347,7 +364,7 @@ class RenewConfirmView(View):
                     f"Server: {server}\n"
                     f"4k: {is_4k}\n"
                     "---------------------\n"
-                    f"Old End: {old_end_str}\n"
+                    f"Old End: {old_end_str2}\n"
                     f"New End: {new_end_date.strftime('%Y-%m-%d')}\n"
                     f"Months Added: {term_length}\n"
                     f"{align_line}\n"
@@ -427,6 +444,7 @@ class UpdateSelectorView(View):
                 'primaryEmail': user_to_update.get('primaryEmail'),
                 'old_server': user_to_update.get('server'),
                 'old_4k': user_to_update.get('4k'),
+                'startDate': user_to_update.get('startDate'),
                 'endDate': user_to_update.get('endDate'),
             })
 
@@ -439,8 +457,7 @@ class UpdateSelectorView(View):
                 options=[discord.SelectOption(label=s, value=s) for s in servers] or
                         [discord.SelectOption(label="(no servers found)", value="__none__")]
             )
-            view = View();
-            view.add_item(srv_sel)
+            view = View(); view.add_item(srv_sel)
 
             async def on_srv(inter: discord.Interaction):
                 try:
@@ -462,8 +479,7 @@ class UpdateSelectorView(View):
                         discord.SelectOption(label="No (1080p only)", value="No"),
                     ]
                 )
-                res_view = View();
-                res_view.add_item(res_sel)
+                res_view = View(); res_view.add_item(res_sel)
 
                 async def on_res(inter2: discord.Interaction):
                     try:
@@ -503,7 +519,8 @@ class UpdateSelectorView(View):
                 view=view
             )
             return
-        # Build preview
+
+        # Build preview (renewal)
         paid_amount = info.get('paidAmount')
         if paid_amount is None:
             await _edit_same_message(interaction, content="Paid amount information is missing.", view=None)
@@ -531,9 +548,9 @@ class UpdateSelectorView(View):
             plan = (config.get(f"PLEX-{_server}", {}) or {}).get("4k" if _is_4k == "Yes" else "1080p", {}) or {}
             return {
                 12: float(plan.get("12Month") or 0),
-                6: float(plan.get("6Month") or 0),
-                3: float(plan.get("3Month") or 0),
-                1: float(plan.get("1Month") or 0),
+                6:  float(plan.get("6Month") or 0),
+                3:  float(plan.get("3Month") or 0),
+                1:  float(plan.get("1Month") or 0),
             }
         prices = _std_prices(server, is_4k)
         remaining = round(float(paid_amount), 2)
@@ -640,8 +657,7 @@ class DiscordUserView(View):
         options.append(discord.SelectOption(label="Cancel", value="cancel"))
 
         sel = discord.ui.Select(placeholder="Confirm Discord user", min_values=1, max_values=1, options=options)
-        view = View();
-        view.add_item(sel)
+        view = View(); view.add_item(sel)
 
         async def on_pick(inter: discord.Interaction):
             try:
@@ -671,8 +687,7 @@ class DiscordUserView(View):
             min_values=1, max_values=1,
             options=[discord.SelectOption(label=x, value=x) for x in pms]
         )
-        view = View();
-        view.add_item(pm)
+        view = View(); view.add_item(pm)
 
         async def on_pm(inter: discord.Interaction):
             try:
@@ -697,8 +712,7 @@ class DiscordUserView(View):
             min_values=1, max_values=1,
             options=[discord.SelectOption(label=s, value=s) for s in servers]
         )
-        view = View();
-        view.add_item(sel)
+        view = View(); view.add_item(sel)
 
         async def on_srv(inter: discord.Interaction):
             try:
@@ -722,8 +736,7 @@ class DiscordUserView(View):
             options=[discord.SelectOption(label="Yes (4K plan)", value="Yes"),
                      discord.SelectOption(label="No (1080p only)", value="No")]
         )
-        view = View();
-        view.add_item(res)
+        view = View(); view.add_item(res)
 
         async def on_res(inter: discord.Interaction):
             try:
@@ -788,11 +801,17 @@ class DiscordUserView(View):
         await interaction.response.edit_message(content=confirmation_message, view=confirmation_view)
 
 
+
 class ConfirmButtonsNewUser(View):
     def __init__(self, information: dict, anchor_message: discord.Message | None = None):
         super().__init__(timeout=180.0)
         self.information = information
         self.anchor_message = anchor_message  # message to overwrite for final summary
+
+        # Extra per-view idempotency guard
+        import asyncio
+        self._processing = False
+        self._lock = asyncio.Lock()
 
         ok = Button(style=discord.ButtonStyle.primary, label="Correct")
         ok.callback = self.correct_callback
@@ -802,50 +821,35 @@ class ConfirmButtonsNewUser(View):
         cancel.callback = self.cancel_callback
         self.add_item(cancel)
 
-    async def _ack_and_freeze(self, interaction: discord.Interaction):
-        # 1) Ack first to avoid "This interaction failed"
+    async def correct_callback(self, interaction: discord.Interaction):
+        # Fast ack & remove buttons to avoid "This interaction failed"
         try:
             if not interaction.response.is_done():
                 await interaction.response.defer_update()
         except Exception:
             pass
-
-        # 2) Disable buttons immediately (prevents double clicks)
         try:
-            for child in self.children:
-                try:
-                    child.disabled = True
-                except Exception:
-                    pass
-            msg = self.anchor_message or getattr(interaction, "message", None)
-            if msg:
-                await msg.edit(view=self)
+            if getattr(interaction, "message", None):
+                await interaction.message.edit(view=None)
         except Exception:
-            # Best-effort removal if editing with a view fails
-            try:
-                msg = self.anchor_message or getattr(interaction, "message", None)
-                if msg:
-                    await msg.edit(view=None)
-            except Exception:
-                pass
+            pass
 
-    async def correct_callback(self, interaction: discord.Interaction):
-        # --- 0) ACK FAST: strip the buttons on the same message so users can't double-click ---
-        # Using edit_message() here counts as the interaction response and avoids "This interaction failed".
-        try:
-            await interaction.response.edit_message(view=None)
-        except Exception:
-            try:
-                if getattr(interaction, "message", None):
-                    await interaction.message.edit(view=None)
-            except Exception:
-                pass  # if the message is gone, just continue silently
+        # Idempotency (per-view)
+        if self._processing or self.information.get('_newuser_done'):
+            return
+        if self._lock.locked():
+            return
+        async with self._lock:
+            if self._processing or self.information.get('_newuser_done'):
+                return
+            self._processing = True
+            self.information['_newuser_done'] = True
 
-        # --- 1) Idempotency: prevent duplicate processing / logs for the same new-user op ---
+        # Cross-process guard
         op_key = _newuser_op_key(self.information)
         async with _NEWUSER_LOCK:
             if op_key in _PROCESSED_NEWUSER_KEYS:
-                return  # already handled
+                return
             _PROCESSED_NEWUSER_KEYS.add(op_key)
 
         errors: list[str] = []
@@ -864,7 +868,7 @@ class ConfirmButtonsNewUser(View):
             start_date = self.information.get('startDate')
             end_date = self.information.get('endDate')
 
-            # 2) Add Discord role (best-effort)
+            # 1) Add Discord role (best-effort)
             try:
                 if discord_user and discord_user_id and discord_role:
                     await add_role(discord_user_id, discord_role)
@@ -872,7 +876,7 @@ class ConfirmButtonsNewUser(View):
                 logging.warning(f"add_role failed: {e}")
                 errors.append("Could not add Discord role")
 
-            # 3) Plex invite (best-effort)
+            # 2) Plex invite (best-effort)
             try:
                 plex_cfg = (config.get(f"PLEX-{server}", {}) or {})
                 base_url = plex_cfg.get('baseUrl')
@@ -881,9 +885,15 @@ class ConfirmButtonsNewUser(View):
                     errors.append(f"Invalid Plex config for '{server}'")
                 else:
                     plex = PlexServer(base_url, token)
+                    section_objs = []
+                    for name in section_names or []:
+                        try:
+                            section_objs.append(plex.library.section(name))
+                        except Exception as e:
+                            logging.warning(f"Library section '{name}' not found on {server}: {e}")
                     try:
                         plex.myPlexAccount().inviteFriend(
-                            user=email, server=plex, sections=section_names, allowSync=True
+                            user=email, server=plex, sections=section_objs or section_names, allowSync=True
                         )
                     except Exception as e:
                         logging.error(f"Plex invite failed for {email} on {server}: {e}")
@@ -892,7 +902,7 @@ class ConfirmButtonsNewUser(View):
                 logging.error(f"Plex auth/invite error: {e}")
                 errors.append("Plex connection error")
 
-            # 4) DB create + transaction log
+            # 3) DB create + transaction log
             try:
                 dbFunctions.create_user(self.information)
                 logging.info(f"Created new user with primary email: {email}")
@@ -901,6 +911,7 @@ class ConfirmButtonsNewUser(View):
                 errors.append("DB create_user failed")
 
             try:
+                self.information.setdefault('what', 'newuser')
                 self.information.setdefault('term_length', int(self.information.get('termLength') or 0))
                 info = dict(self.information)
                 if info.get('what') == 'move' and info.get('paidAmount') is None:
@@ -911,7 +922,7 @@ class ConfirmButtonsNewUser(View):
                 logging.info(f"log_transaction error: {e}")
                 errors.append("log_transaction failed")
 
-            # 5) Referral reward (best-effort)
+            # 4) Referral reward (best-effort)
             try:
                 referrer_id = self.information.get('referrerUserId')
                 if referrer_id:
@@ -943,12 +954,12 @@ class ConfirmButtonsNewUser(View):
                             logging.error(f"Referral DB update failed: {e}")
                             errors.append("Referral DB update failed")
 
-                        # Optional: notify referrer (best-effort, non-fatal)
+                        # Optional: notify referrer
                         try:
                             ref_subject = dcfg.get("referralSubject", "Referral bonus applied")
                             ref_body_tmpl = dcfg.get(
                                 "referralBody",
-                                "Thanks for referring {referredEmail}.\n"
+                                "Thanks for referring {referredEmail}.\\n"
                                 "We extended your subscription from {beforeEnd} to {afterEnd} (+{daysExtended} days)."
                             )
                             ref_body = ref_body_tmpl.format(
@@ -969,19 +980,18 @@ class ConfirmButtonsNewUser(View):
                                     logging.warning(f"Could not email referrer: {e}")
                         except Exception as e:
                             logging.warning(f"Notify referrer failed: {e}")
-                    # if inactive or not found: silently skip per your preference
             except Exception as e:
-                logging.error(f"Referral handling error: {e}")
-                errors.append("Referral handling error")
+                logging.exception(e)
+                errors.append(f"Unexpected error: {e}")
 
-            # 6) Notify the new user (best-effort, non-fatal)
+            # 5) Notify the new user (best-effort, non-fatal)
             try:
                 subject = dcfg.get('paymentSubject', "Subscription Created")
                 body_tmpl = dcfg.get(
                     'paymentBody',
-                    "Your subscription for {primaryEmail} has been created.\n"
-                    "Server: {server}\n"
-                    "Libraries: {section_names}\n"
+                    "Your subscription for {primaryEmail} has been created.\\n"
+                    "Server: {server}\\n"
+                    "Libraries: {section_names}\\n"
                     "End: {newEndDate}"
                 )
                 body = body_tmpl.format(
@@ -996,16 +1006,15 @@ class ConfirmButtonsNewUser(View):
             except Exception as e:
                 logging.warning(f"Notify new user failed: {e}")
                 errors.append("User notification failed")
-
         except Exception as e:
             logging.exception(e)
-            errors.append(f"Unexpected error: {e}")
+            errors.append(f"Unexpected top-level error: {e}")
 
-        # 7) Only if anything went wrong, show a single ephemeral follow-up
+        # 6) Only if anything went wrong, show a single ephemeral follow-up
         if errors:
             try:
                 await interaction.followup.send(
-                    "Some steps completed with issues:\n- " + "\n- ".join(errors),
+                    "Some steps completed with issues:\\n- " + "\\n- ".join(errors),
                     ephemeral=True
                 )
             except Exception:
@@ -1027,10 +1036,6 @@ class ConfirmButtonsNewUser(View):
         except Exception:
             pass
 
-
-# ======================================================================
-#                                MOVE USER
-# ======================================================================
 class ConfirmButtonsMoveUser(View):
     def __init__(self, information):
         super().__init__(timeout=180.0)
@@ -1092,10 +1097,6 @@ class ConfirmButtonsMoveUser(View):
             opt_libs = (config.get(f"PLEX-{new_server}", {}) or {}).get('optionalLibraries') or []
             section_names = (std_libs + opt_libs) if (self.information.get('4k') == "Yes") else std_libs
             _old_srv = self.information.get('old_server')
-            _old_cfg = (config.get(f"PLEX-{_old_srv}", {}) or {})
-            _old_std = _old_cfg.get('standardLibraries') or []
-            _old_opt = _old_cfg.get('optionalLibraries') or []
-            old_section_names = (_old_std + _old_opt) if (self.information.get('old_4k') == "Yes") else _old_std
 
             plex_config = (config.get(f'PLEX-{new_server}', {}) or {})
             base_url = plex_config.get('baseUrl')
@@ -1105,17 +1106,32 @@ class ConfirmButtonsMoveUser(View):
             else:
                 try:
                     plex = PlexServer(base_url, token)
+                    # Step 1: remove old shares on old server
                     try:
-                        update_user = plex.myPlexAccount().updateFriend(
-                            user=email,
-                            server=plex,
-                            sections=section_names,
-                            removeSections=old_section_names
-                        )
-                        if update_user:
-                            logging.info(f"User '{email}' updated in Plex server '{new_server}'")
+                        if _old_srv and _old_srv != new_server:
+                            old_cfg = (config.get(f"PLEX-{_old_srv}", {}) or {})
+                            old_base = old_cfg.get('baseUrl'); old_tok = old_cfg.get('token')
+                            if old_base and old_tok:
+                                old_plex = PlexServer(old_base, old_tok)
+                                plex.myPlexAccount().updateFriend(user=email, server=old_plex, removeSections=True)
+                            else:
+                                logging.warning(f"Old server '{_old_srv}' missing baseUrl/token; cannot remove old shares.")
                     except Exception as e:
-                        logging.error(f"Error updating user {email} to {new_server} with sections {section_names}: {e}")
+                        logging.error(f"Error removing old shares for {email} on '{_old_srv}': {e}")
+
+                    # Step 2: share on new server
+                    try:
+                        # Resolve LibrarySection objects from NEW server
+                        new_section_objs = []
+                        for name in section_names or []:
+                            try:
+                                new_section_objs.append(plex.library.section(name))
+                            except Exception as e:
+                                logging.warning(f"Library section '{name}' not found on {new_server}: {e}")
+                        plex.myPlexAccount().inviteFriend(user=email, server=plex, sections=new_section_objs or section_names)
+                        logging.info(f"User '{email}' shared to Plex server '{new_server}'")
+                    except Exception as e:
+                        logging.error(f"Error sharing user {email} to {new_server}: {e}")
                 except Exception as e:
                     logging.error(f"Error authenticating to Plex at {base_url}: {e}")
 
@@ -1124,7 +1140,8 @@ class ConfirmButtonsMoveUser(View):
                 dbFunctions.update_database(self.information.get('id'), "4k", new_4k)
                 try:
                     info = dict(self.information)
-                    if info.get('what') == 'move' and info.get('paidAmount') is None:
+                    info.setdefault('what', 'move')
+                    if info.get('paidAmount') is None:
                         info['paidAmount'] = 0.0
                     dbFunctions.log_transaction(information=info)
                 except Exception as e:
@@ -1154,12 +1171,55 @@ class ConfirmButtonsMoveUser(View):
             pass
         await _edit_same_message(interaction, content="Cancelled the request.", view=None)
 
+
+# ======================================================================
+#                        CALCULATE MOVE COST
+# ======================================================================
+
+class CalculateUserSelector(discord.ui.Select):
+    def __init__(self, search_results):
+        options = []
+        for row in search_results or []:
+            email = (row or {}).get('primaryEmail')
+            discord_name = (row or {}).get('primaryDiscord')
+            status = (row or {}).get('status')
+            payment_person = (row or {}).get('paymentPerson')
+            if not email:
+                continue
+            label = f"{email} - {discord_name} - {status} - {payment_person}"
+            options.append(discord.SelectOption(label=label, value=email))
+        placeholder = "Please select the user"
+        super().__init__(placeholder=placeholder, min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer_update()
+        except Exception:
+            pass
+        picked_email = self.values[0]
+        matches = dbFunctions.find_user(picked_email) or []
+        user_row = next(
+            (r for r in matches
+             if (r.get('primaryEmail') or '').strip().lower() == picked_email.strip().lower()
+             or (r.get('secondaryEmail') or '').strip().lower() == picked_email.strip().lower()),
+            matches[0] if matches else None
+        )
+        if not user_row:
+            await _edit_same_message(interaction, content=f"The person for {picked_email} does not exist in DB.", view=None)
+            return
+        view = CalculateMoveCostView(user_row)
+        await view.start(interaction)
+
+class CalculateUserSelectorView(View):
+    def __init__(self, search_results):
+        super().__init__(timeout=180.0)
+        self.add_item(CalculateUserSelector(search_results))
+
 def _round_up_50_cents(x: float) -> float:
     # Always round UP to nearest $0.50
-    # e.g., 0.01->0.50, 0.50->0.50, 0.51->1.00
     steps = math.ceil((x + 1e-9) / 0.50)
     return round(steps * 0.50 + 0.0, 2)
-
 
 def _parse_date_yyyy_mm_dd_safe(s):
     try:
@@ -1167,28 +1227,20 @@ def _parse_date_yyyy_mm_dd_safe(s):
     except Exception:
         return None
 
-
 def _months_span(start: date, end: date) -> int:
     """Return whole-month span (approximate plan length) between start and end using relativedelta."""
     if not (start and end) or end <= start:
         return 0
     rd = relativedelta(end, start)
     months = rd.years * 12 + rd.months
-    # Count near-full months if days are large
-    if rd.days >= 14:  # mid-month or more -> bump
+    if rd.days >= 14:
         months += 1
     return max(1, months)
 
-
 def _tier_key_for_months(m: int) -> tuple[int, str]:
-    """
-    Map a month length to one of {1,3,6,12} by nearest.
-    Returns (months, tierKeyString) where tierKeyString is "1Month", "3Month", ...
-    """
     candidates = [1, 3, 6, 12]
     best = min(candidates, key=lambda c: abs(c - max(1, m)))
     return best, f"{best}Month"
-
 
 def _price_for(server_name: str, is4k: str, tier_months: int) -> float:
     plan_block = (config.get(f"PLEX-{server_name}", {}) or {}).get("4k" if is4k == "Yes" else "1080p", {}) or {}
@@ -1198,22 +1250,14 @@ def _price_for(server_name: str, is4k: str, tier_months: int) -> float:
     except Exception:
         return 0.0
 
-
 class CalculateMoveCostView(View):
-    """
-    Flow:
-      1) You pick a user (via build_calculate_move_view -> this view renders server picker)
-      2) We immediately display CURRENT subscription (server/4k/dates/tier)
-      3) You pick NEW server -> pick 4K -> we compute owed = (new-old) * remaining_fraction (rounded up $0.50)
-    """
-
+    """Menu-driven estimator showing current subscription before selecting new plan."""
     def __init__(self, user_row: dict):
         super().__init__(timeout=180.0)
         self.user = user_row
         self._picked_server = None
 
-        # Server select (new target)
-        servers = [k.replace("PLEX-", "") for k in config.keys() if isinstance(k, str) and k.startswith("PLEX-")]
+        servers = [k.replace("PLEX-","") for k in config.keys() if isinstance(k, str) and k.startswith("PLEX-")]
         srv = discord.ui.Select(
             placeholder="Select the NEW server",
             min_values=1, max_values=1,
@@ -1224,24 +1268,21 @@ class CalculateMoveCostView(View):
         self.add_item(srv)
 
     async def start(self, interaction: discord.Interaction):
-        # Show current subscription immediately
         start = _parse_date_yyyy_mm_dd_safe(self.user.get("startDate"))
-        end = _parse_date_yyyy_mm_dd_safe(self.user.get("endDate"))
+        end   = _parse_date_yyyy_mm_dd_safe(self.user.get("endDate"))
         today = datetime.now().date()
 
-        # Compute current tier based on start/end span
         months = _months_span(start, end) if (start and end) else 0
         tier_m, tier_key = _tier_key_for_months(months) if months else (0, "?")
 
-        # Lapsed / remaining
         if start and end and end > start:
             total_days = (end - start).days
             elapsed = max(0, (today - start).days)
             elapsed = min(elapsed, total_days)
             lapsed_frac = (elapsed / total_days) if total_days else 1.0
             remaining_frac = 1.0 - lapsed_frac
-            lapsed_pct = f"{lapsed_frac * 100:.1f}%"
-            remain_pct = f"{remaining_frac * 100:.1f}%"
+            lapsed_pct = f"{lapsed_frac*100:.1f}%"
+            remain_pct = f"{remaining_frac*100:.1f}%"
         else:
             lapsed_pct = "n/a"
             remain_pct = "n/a"
@@ -1275,7 +1316,6 @@ class CalculateMoveCostView(View):
 
         self._picked_server = sel
 
-        # 4K picker
         res = discord.ui.Select(
             placeholder="4K for NEW plan?",
             min_values=1, max_values=1,
@@ -1283,8 +1323,7 @@ class CalculateMoveCostView(View):
                      discord.SelectOption(label="No (1080p only)", value="No")]
         )
         res.callback = self._on_resolution
-        v = View();
-        v.add_item(res)
+        v = View(); v.add_item(res)
 
         await _edit_same_message(
             interaction,
@@ -1299,36 +1338,32 @@ class CalculateMoveCostView(View):
         except Exception:
             pass
 
-        new_4k = (interaction.data.get("values", [None])[0] if hasattr(interaction, "data") else None) or "No"
+        new_4k = (interaction.data.get("values",[None])[0] if hasattr(interaction,"data") else None) or "No"
 
-        # Compute months (tier) from current start/end
         start = _parse_date_yyyy_mm_dd_safe(self.user.get("startDate"))
-        end = _parse_date_yyyy_mm_dd_safe(self.user.get("endDate"))
+        end   = _parse_date_yyyy_mm_dd_safe(self.user.get("endDate"))
         today = datetime.now().date()
 
         if not (start and end) or end <= start:
-            await _edit_same_message(interaction, content="User has invalid start/end dates; cannot estimate.",
-                                     view=None)
+            await _edit_same_message(interaction, content="User has invalid start/end dates; cannot estimate.", view=None)
             return
 
         months = _months_span(start, end)
         tier_m, _tier_key = _tier_key_for_months(months)
 
-        # Remaining fraction
         total_days = (end - start).days
         elapsed = max(0, (today - start).days)
         elapsed = min(elapsed, total_days)
         lapsed_frac = (elapsed / total_days) if total_days else 1.0
         remaining_frac = 1.0 - lapsed_frac
 
-        # Prices at that same tier (old vs new)
         old_server = self.user.get("server")
         old_4k = self.user.get("4k")
 
         old_price = _price_for(old_server, old_4k, tier_m)
         new_price = _price_for(self._picked_server, new_4k, tier_m)
 
-        diff = max(0.0, new_price - old_price)  # clamp (no credits); change if you want credits
+        diff = max(0.0, new_price - old_price)
         owed_raw = diff * remaining_frac
         owed = _round_up_50_cents(owed_raw)
 
@@ -1356,20 +1391,8 @@ class CalculateMoveCostView(View):
 
 
 def build_calculate_move_view(user_query: str) -> View | None:
-    """
-    Entry point for /calculate_move. Finds a single user; if multiple matches you can pass an exact email.
-    If exactly one is found, returns an interactive view that starts by showing CURRENT subscription.
-    """
+    """Entry for /calculate_move: always show selection list to confirm the user first."""
     results = dbFunctions.find_user(user_query) or []
     if not results:
         return None
-
-    # Prefer exact email match if present; else take first
-    def norm(s): return (s or "").strip().lower()
-
-    user_row = next(
-        (r for r in results if
-         norm(r.get("primaryEmail")) == norm(user_query) or norm(r.get("secondaryEmail")) == norm(user_query)),
-        results[0]
-    )
-    return CalculateMoveCostView(user_row)
+    return CalculateUserSelectorView(results)

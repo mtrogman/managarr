@@ -163,52 +163,86 @@ def update_database(user_id, field, value):
             cursor.close()
             connection.close()
 
+def log_transaction(information: dict):
+    """
+    Insert a transaction row.
+    Expects the following keys (some optional):
+      - what: "newuser" | "renew" | "move" | custom (defaults to "newuser")
+      - primaryEmail (entity_id)
+      - paidAmount (amount)
+      - paymentMethod
+      - server, 4k, termLength/term_length (for notes)
+      - oldStartDate, oldEndDate (optional, for notes)
+    """
+    import mysql.connector, logging
+    from datetime import datetime
 
-def log_transaction(information):
+    description = str(information.get('what') or 'newuser')
     try:
-        connection = create_connection()
-        if connection:
-            cursor = connection.cursor()
-            # Loop through each user in the information's "users" list
-            description = information.get('what', 'Transaction')  # General description
-            amount = information.get('paidAmount')
+        amount = float(information.get('paidAmount') or 0.0)
+    except Exception:
+        amount = 0.0
+    entity_id = (
+        information.get('primaryEmail')
+        or information.get('entity_id')
+        or information.get('email')
+        or ''
+    )
+    payment_method = information.get('paymentMethod') or ''
 
-            if description == "payment":
-                for user in information.get('users', []):
-                    # Extract data for each user
-                    entity_id = user.get('primaryEmail', 'Unknown')
-                    payment_method = user.get('paymentMethod', 'Unknown')
+    # build notes
+    term_len = information.get('termLength', information.get('term_length'))
+    try:
+        term_len = int(term_len) if term_len is not None else None
+    except Exception:
+        term_len = None
 
-                term_length = str(user.get('term_length', "")) + " Months"
-                notes = f"Server: {user.get('server')} | 4k: {user.get('4k')} | Length: {term_length}"
-            elif description == "move":
-                for user in information.get('users', []):
-                    entity_id = user.get('primaryEmail', 'Unknown')
-                    payment_method = user.get('paymentMethod', 'Unknown')
-                    notes = f"Server: {user.get('server')}"
-            elif description == "newuser":
-                entity_id = information.get('primaryEmail', 'Unknown')
-                payment_method = information.get('paymentMethod', 'Unknown')
-                notes = f"Server: {information.get('server')} | 4k: {information.get('4k')} | Length: {information.get('termLength')}"
+    notes_parts = []
+    if information.get('server'):
+        notes_parts.append(f"Server: {information.get('server')}")
+    if information.get('4k'):
+        notes_parts.append(f"4k: {information.get('4k')}")
+    if term_len:
+        notes_parts.append(f"Length: {term_len}")
+    if information.get('oldStartDate'):
+        notes_parts.append(f"OldStart: {information.get('oldStartDate')}")
+    if information.get('oldEndDate'):
+        notes_parts.append(f"OldEnd: {information.get('oldEndDate')}")
+    notes = " | ".join(notes_parts)
 
-            # SQL query to insert a new transaction
-            insert_query = """
-            INSERT INTO transactions (description, entity_id, amount, payment_method, notes)
-            VALUES (%s, %s, %s, %s, %s)
-            """
-            cursor.execute(insert_query, (description, entity_id, amount, payment_method, notes))
-
-            # Log success for each user
-            logging.info(f"Logged transaction for {entity_id} with amount: {amount}")
-
-            # Commit all changes after the loop
-            connection.commit()
+    connection = None
+    cursor = None
+    try:
+        connection = mysql.connector.connect(**db_config)
+        cursor = connection.cursor()
+        insert_sql = (
+            "INSERT INTO transactions (timestamp, description, entity_id, amount, payment_method, notes) "
+            "VALUES (%s, %s, %s, %s, %s, %s)"
+        )
+        cursor.execute(
+            insert_sql,
+            (datetime.now(), description, entity_id, amount, payment_method, notes),
+        )
+        connection.commit()
+        logging.info(
+            f"Transaction inserted: desc={description}, entity={entity_id}, amount={amount}, pm={payment_method}, notes={notes}"
+        )
     except mysql.connector.Error as e:
-        logging.error(f"Error logging transactions: {e}")
+        logging.error(f"DB error inserting transaction: {e}")
+        if connection:
+            connection.rollback()
+        raise
+    except Exception as e:
+        logging.error(f"log_transaction unexpected error: {e}")
+        raise
     finally:
-        if connection and connection.is_connected():
-            cursor.close()
-            connection.close()
+        try:
+            if cursor:
+                cursor.close()
+            if connection and connection.is_connected():
+                connection.close()
+        except Exception:
+            pass
 
 def get_user_by_id(user_id: int):
     """Return a single user row (dict) by primary id, or None."""
