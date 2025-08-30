@@ -301,7 +301,7 @@ class RenewConfirmView(View):
                 server = user_to_update.get('server')
                 is_4k = user_to_update.get('4k')
 
-                # --- Capture old dates BEFORE updating DB ---
+                # --- Capture old & prior values BEFORE updating DB ---
                 old_start_val = user_to_update.get('startDate')
                 if isinstance(old_start_val, datetime):
                     old_start_date = old_start_val.date()
@@ -314,10 +314,57 @@ class RenewConfirmView(View):
                     old_start_date = old_start_val  # date or None
                 old_end_date = self.ctx.get("old_end_date")
 
+                prior_status = (user_to_update.get('status') or '').strip().lower()
+
                 # Update DB
                 dbFunctions.update_database(user_id, "startDate", start_date.strftime('%Y-%m-%d'))
                 dbFunctions.update_database(user_id, "endDate", new_end_date.strftime('%Y-%m-%d'))
                 dbFunctions.update_database(user_id, "status", "Active")
+
+                # -------------------- ADD: Reactivate access if previously inactive --------------------
+                # Reuse the same logic as new-user provisioning: add Discord role and ensure Plex share.
+                # Everything is best-effort and idempotent (no errors if already present).
+                if prior_status != "active":
+                    try:
+                        # Discord role
+                        discord_user_id = user_to_update.get('primaryDiscordId')
+                        discord_role = ((config.get(f"PLEX-{server}", {}) or {}).get('role'))
+                        if discord_user_id and discord_role:
+                            try:
+                                await add_role(discord_user_id, discord_role)
+                            except Exception as e:
+                                logging.warning(f"[reactivate] add_role failed for {discord_user_id}: {e}")
+
+                        # Plex share
+                        try:
+                            plex_cfg = (config.get(f"PLEX-{server}", {}) or {})
+                            base_url = plex_cfg.get('baseUrl')
+                            token = plex_cfg.get('token')
+                            email = user_to_update.get('primaryEmail')
+                            if base_url and token and email:
+                                std_libs = (plex_cfg.get('standardLibraries') or [])
+                                opt_libs = (plex_cfg.get('optionalLibraries') or [])
+                                sections = (std_libs + opt_libs) if (str(is_4k) == "Yes") else std_libs
+
+                                plex = PlexServer(base_url, token)
+                                section_objs = []
+                                for name in sections or []:
+                                    try:
+                                        section_objs.append(plex.library.section(name))
+                                    except Exception as e:
+                                        logging.warning(f"[reactivate] Missing library '{name}' on {server}: {e}")
+                                try:
+                                    plex.myPlexAccount().inviteFriend(
+                                        user=email, server=plex, sections=section_objs or sections, allowSync=True
+                                    )
+                                except Exception as e:
+                                    # Already shared / pending invite usually throws; non-fatal
+                                    logging.info(f"[reactivate] Plex invite skipped/failed for {email}: {e}")
+                        except Exception as e:
+                            logging.warning(f"[reactivate] Plex handling error: {e}")
+                    except Exception as e:
+                        logging.debug(f"[reactivate] step skipped due to error: {e}")
+                # --------------------------------------------------------------------------------------
 
                 # Log (quiet fail) + include old dates for downstream logger
                 info = dict(self.ctx.get("information") or {})
@@ -959,7 +1006,7 @@ class ConfirmButtonsNewUser(View):
                             ref_subject = dcfg.get("referralSubject", "Referral bonus applied")
                             ref_body_tmpl = dcfg.get(
                                 "referralBody",
-                                "Thanks for referring {referredEmail}.\\n"
+                                "Thanks for referring {referredEmail}.\n"
                                 "We extended your subscription from {beforeEnd} to {afterEnd} (+{daysExtended} days)."
                             )
                             ref_body = ref_body_tmpl.format(
@@ -989,9 +1036,9 @@ class ConfirmButtonsNewUser(View):
                 subject = dcfg.get('paymentSubject', "Subscription Created")
                 body_tmpl = dcfg.get(
                     'paymentBody',
-                    "Your subscription for {primaryEmail} has been created.\\n"
-                    "Server: {server}\\n"
-                    "Libraries: {section_names}\\n"
+                    "Your subscription for {primaryEmail} has been created.\n"
+                    "Server: {server}\n"
+                    "Libraries: {section_names}\n"
                     "End: {newEndDate}"
                 )
                 body = body_tmpl.format(
@@ -1014,7 +1061,7 @@ class ConfirmButtonsNewUser(View):
         if errors:
             try:
                 await interaction.followup.send(
-                    "Some steps completed with issues:\\n- " + "\\n- ".join(errors),
+                    "Some steps completed with issues:\n- " + "\n- ".join(errors),
                     ephemeral=True
                 )
             except Exception:
@@ -1117,7 +1164,7 @@ class ConfirmButtonsMoveUser(View):
                             else:
                                 logging.warning(f"Old server '{_old_srv}' missing baseUrl/token; cannot remove old shares.")
                     except Exception as e:
-                        logging.error(f"Error removing old shares for {email} on '{_old_srv}': {e}")
+                        logging.error(f"Error removing old shares for {email} on '{__old_srv}': {e}")
 
                     # Step 2: share on new server
                     try:
