@@ -1117,8 +1117,12 @@ class ConfirmButtonsNewUser(View):
 
 class ConfirmButtonsMoveUser(View):
     def __init__(self, information: dict):
-        super().__init__()
+        super().__init__(timeout=180.0)
         self.information = information
+
+        import asyncio
+        self._processing = False
+        self._lock = asyncio.Lock()
 
         ok = Button(style=discord.ButtonStyle.primary, label="Correct")
         ok.callback = self.correct_callback
@@ -1129,133 +1133,161 @@ class ConfirmButtonsMoveUser(View):
         self.add_item(cancel)
 
     async def correct_callback(self, interaction: discord.Interaction):
+        # Ack immediately to avoid 'This interaction failed'
         try:
             if not interaction.response.is_done():
                 await interaction.response.defer_update()
         except Exception:
             pass
 
-        info = self.information
-        email       = (info.get('primaryEmail') or '').strip()
-        old_server  = info.get('old_server')
-        new_server  = info.get('server')
-        old_4k      = (info.get('old_4k') or "No")
-        new_4k      = (info.get('4k') or "No")
-        user_id     = info.get('id')
-        discord_uid = info.get('primaryDiscordId')
-
-        errors = []
-
-        # --- NEW server invite/update (use Section objects) ---
+        # Disable buttons immediately (prevent re-clicks) and update the same message
         try:
-            new_cfg  = (config.get(f"PLEX-{new_server}", {}) or {})
-            base_url = new_cfg.get('baseUrl'); token = new_cfg.get('token')
-            std_libs = new_cfg.get('standardLibraries', []) or []
-            opt_libs = new_cfg.get('optionalLibraries', []) or []
-            desired_names = (std_libs + opt_libs) if new_4k == "Yes" else std_libs
-
-            plex_new = PlexServer(base_url, token)
-
-            def as_sections(plex, names):
-                objs = []
-                for n in names:
-                    try:
-                        objs.append(plex.library.section(n))
-                    except Exception as e:
-                        logging.warning(f"[move] section '{n}' not found on {new_server}: {e}")
-                return objs or names
-
-            sections = as_sections(plex_new, desired_names)
-            try:
-                plex_new.myPlexAccount().inviteFriend(
-                    user=email, server=plex_new, sections=sections, allowSync=True
-                )
-                logging.info(f"[move] invited {email} to {new_server} with {desired_names}")
-            except Exception as e:
-                if "already sharing" in str(e).lower():
-                    plex_new.myPlexAccount().updateFriend(
-                        user=email, server=plex_new, sections=sections, allowSync=True
-                    )
-                    logging.info(f"[move] updated libraries for {email} on {new_server}")
-                else:
-                    errors.append(f"Invite failed on {new_server}")
-                    logging.error(f"[move] invite to {new_server} failed: {e}")
-        except Exception as e:
-            errors.append(f"Plex auth failed for {new_server}")
-            logging.error(f"[move] auth to {new_server} failed: {e}")
-
-        if old_server and old_server != new_server:
-            old_cfg  = (config.get(f"PLEX-{old_server}", {}) or {})
-            old_url  = old_cfg.get('baseUrl'); old_tok = old_cfg.get('token')
-            old_plex = PlexServer(old_url, old_tok)
-
-            try:
-                removed = old_plex.myPlexAccount().removeFriend(email)
-                if removed:
-                    logging.info("User '%s' has been successfully removed from Plex server '%s'", email, old_plex)
-                else:
-                    logging.warning("Friendship with '%s' not found and thus not removed.", email)
-            except Exception as e:
-                logging.warning("Error removing friendship for '%s' on '%s': %s", email, old_plex, e)
-
-        # --- Discord role (best-effort) ---
-        try:
-            new_role = (config.get(f"PLEX-{new_server}", {}) or {}).get('role')
-            if discord_uid and new_role:
-                await add_role(discord_uid, new_role)
-        except Exception as e:
-            logging.warning(f"[move] discord role update warning: {e}")
-
-        # --- DB updates + log ---
-        try:
-            if user_id is not None:
-                if old_server != new_server:
-                    dbFunctions.update_database(user_id, "server", new_server)
-                if old_4k != new_4k:
-                    dbFunctions.update_database(user_id, "4k", new_4k)
-            info_out = dict(info); info_out['desc'] = 'move'
-            if info_out.get('paidAmount') is None:
-                info_out['paidAmount'] = 0.0
-            dbFunctions.log_transaction(information=info_out)
-        except Exception as e:
-            errors.append("DB update/log failed")
-            logging.error(f"[move] DB/log failed: {e}")
-
-        # --- Notify (best-effort) ---
-        try:
-            subject = (config.get("discord", {}) or {}).get('moveSubject')
-            body_tmpl = (config.get("discord", {}) or {}).get('moveBody')
-            if subject and body_tmpl:
-                body = body_tmpl.format(primaryEmail=email, server=new_server, section_names=desired_names)
-                if discord_uid:
-                    await send_discord_message(to_user=discord_uid, subject=subject, body=body)
-                emailFunctions.send_email(config_location, subject, body, email)
-        except Exception as e:
-            logging.warning(f"[move] notification warn: {e}")
-
-        # Summary
-        summary = (
-            "---------------------\n"
-            f"Email: {email}\n"
-            f"Old Server: {old_server}\n"
-            f"Old 4k: {old_4k}\n"
-            "---------------------\n"
-            f"New Server: {new_server}\n"
-            f"New 4k: {new_4k}\n"
-            f"Paid Amount: {info.get('paidAmount')}\n"
-            f"End Date: {info.get('endDate')}\n"
-            f"{'Issues: ' + ', '.join(errors) if errors else 'All steps completed.'}\n"
-        )
-        try:
-            if interaction.message:
-                await interaction.message.edit(content=summary, view=None)
-            else:
-                await interaction.response.edit_message(content=summary, view=None)
+            for child in self.children:
+                try:
+                    child.disabled = True
+                except Exception:
+                    pass
+            if getattr(interaction, "message", None):
+                await interaction.message.edit(view=self)
         except Exception:
             try:
-                await interaction.followup.send(summary, ephemeral=True)
+                if getattr(interaction, "message", None):
+                    await interaction.message.edit(view=None)
             except Exception:
                 pass
+
+        info = self.information
+        # Idempotency guard (mirror RenewConfirmView)
+        if self._processing or info.get('_move_done'):
+            return
+        if self._lock.locked():
+            return
+        async with self._lock:
+            if self._processing or info.get('_move_done'):
+                return
+            self._processing = True
+            info['_move_done'] = True
+
+            email       = (info.get('primaryEmail') or '').strip()
+            old_server  = info.get('old_server')
+            new_server  = info.get('server')
+            old_4k      = (info.get('old_4k') or "No")
+            new_4k      = (info.get('4k') or "No")
+            user_id     = info.get('id')
+            discord_uid = info.get('primaryDiscordId')
+
+            errors = []
+
+            # --- NEW server invite/update (use Section objects) ---
+            try:
+                new_cfg  = (config.get(f"PLEX-{new_server}", {}) or {})
+                base_url = new_cfg.get('baseUrl'); token = new_cfg.get('token')
+                std_libs = new_cfg.get('standardLibraries', []) or []
+                opt_libs = new_cfg.get('optionalLibraries', []) or []
+                desired_names = (std_libs + opt_libs) if new_4k == "Yes" else std_libs
+
+                plex_new = PlexServer(base_url, token)
+
+                def as_sections(plex, names):
+                    objs = []
+                    for n in names:
+                        try:
+                            objs.append(plex.library.section(n))
+                        except Exception as e:
+                            logging.warning(f"[move] section '{n}' not found on {new_server}: {e}")
+                    return objs or names
+
+                sections = as_sections(plex_new, desired_names)
+                try:
+                    plex_new.myPlexAccount().inviteFriend(
+                        user=email, server=plex_new, sections=sections, allowSync=True
+                    )
+                    logging.info(f"[move] invited {email} to {new_server}")
+                except Exception as e:
+                    if "already sharing" in str(e).lower():
+                        plex_new.myPlexAccount().updateFriend(
+                            user=email, server=plex_new, sections=sections, allowSync=True
+                        )
+                        logging.info(f"[move] updated libraries for {email} on {new_server}")
+                    else:
+                        errors.append(f"Invite failed on {new_server}")
+                        logging.error(f"[move] invite to {new_server} failed: {e}")
+            except Exception as e:
+                errors.append(f"Plex auth failed for {new_server}")
+                logging.error(f"[move] auth to {new_server} failed: {e}")
+
+            if old_server and old_server != new_server:
+                old_cfg  = (config.get(f"PLEX-{old_server}", {}) or {})
+                old_url  = old_cfg.get('baseUrl'); old_tok = old_cfg.get('token')
+                old_plex = PlexServer(old_url, old_tok)
+
+                try:
+                    removed = old_plex.myPlexAccount().removeFriend(email)
+                    if removed:
+                        logging.info("User '%s' has been successfully removed from Plex server '%s'", email, old_plex)
+                    else:
+                        logging.warning("Friendship with '%s' not found and thus not removed.", email)
+                except Exception as e:
+                    logging.warning("Error removing friendship for '%s' on '%s': %s", email, old_plex, e)
+
+            # --- Discord role (best-effort) ---
+            try:
+                new_role = (config.get(f"PLEX-{new_server}", {}) or {}).get('role')
+                if discord_uid and new_role:
+                    await add_role(discord_uid, new_role)
+            except Exception as e:
+                logging.warning(f"[move] discord role update warning: {e}")
+
+            # --- DB updates + log ---
+            try:
+                if user_id is not None:
+                    if old_server != new_server:
+                        dbFunctions.update_database(user_id, "server", new_server)
+                    if old_4k != new_4k:
+                        dbFunctions.update_database(user_id, "4k", new_4k)
+                info_out = dict(info); info_out['desc'] = 'move'
+                if info_out.get('paidAmount') is None:
+                    info_out['paidAmount'] = 0.0
+                dbFunctions.log_transaction(information=info_out)
+            except Exception as e:
+                errors.append("DB update/log failed")
+                logging.error(f"[move] DB/log failed: {e}")
+
+            # --- Notify (best-effort) ---
+            try:
+                subject = (config.get("discord", {}) or {}).get('moveSubject')
+                body_tmpl = (config.get("discord", {}) or {}).get('moveBody')
+                if subject and body_tmpl:
+                    body = body_tmpl.format(primaryEmail=email, server=new_server, section_names=desired_names)
+                    if discord_uid:
+                        await send_discord_message(to_user=discord_uid, subject=subject, body=body)
+                    emailFunctions.send_email(config_location, subject, body, email)
+            except Exception as e:
+                logging.warning(f"[move] notification warn: {e}")
+
+            # Summary
+            summary = (
+                "---------------------\n"
+                f"Email: {email}\n"
+                f"Old Server: {old_server}\n"
+                f"Old 4k: {old_4k}\n"
+                "---------------------\n"
+                f"New Server: {new_server}\n"
+                f"New 4k: {new_4k}\n"
+                f"Paid Amount: {info.get('paidAmount')}\n"
+                f"End Date: {info.get('endDate')}\n"
+                f"{'Issues: ' + ', '.join(errors) if errors else 'All steps completed.'}\n"
+            )
+            try:
+                if interaction.message:
+                    await interaction.message.edit(content=summary, view=None)
+                else:
+                    await interaction.response.edit_message(content=summary, view=None)
+            except Exception:
+                try:
+                    await interaction.followup.send(summary, ephemeral=True)
+                except Exception:
+                    pass
 
     async def cancel_callback(self, interaction: discord.Interaction):
         try:
