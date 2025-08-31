@@ -321,9 +321,7 @@ class RenewConfirmView(View):
                 dbFunctions.update_database(user_id, "endDate", new_end_date.strftime('%Y-%m-%d'))
                 dbFunctions.update_database(user_id, "status", "Active")
 
-                # -------------------- ADD: Reactivate access if previously inactive --------------------
-                # Reuse the same logic as new-user provisioning: add Discord role and ensure Plex share.
-                # Everything is best-effort and idempotent (no errors if already present).
+                # -------------------- Reactivate access if previously inactive --------------------
                 if prior_status != "active":
                     try:
                         # Discord role
@@ -364,7 +362,7 @@ class RenewConfirmView(View):
                             logging.warning(f"[reactivate] Plex handling error: {e}")
                     except Exception as e:
                         logging.debug(f"[reactivate] step skipped due to error: {e}")
-                # --------------------------------------------------------------------------------------
+                # ----------------------------------------------------------------------------------
 
                 # Log (quiet fail) + include old dates for downstream logger
                 info = dict(self.ctx.get("information") or {})
@@ -434,32 +432,65 @@ class RenewConfirmView(View):
             pass
         await self._edit_anchor(interaction, content="Cancelled the request.", view=None)
 
+
 class UpdateSelector(Select):
     def __init__(self, data, information):
         self.information = information
-        options = []
-        for row in data or []:
-            email = (row or {}).get('primaryEmail')
-            discord_name = (row or {}).get('primaryDiscord')
-            status = (row or {}).get('status')
-            payment_person = (row or {}).get('paymentPerson')
-            if not email:
-                continue
-            label = f"{email} - {discord_name} - {status} - {payment_person}"
-            options.append(discord.SelectOption(label=label, value=email))
 
+        # De-dupe rows by a stable key (prefer DB id)
+        seen = set()
+        rows = []
+        for row in (data or []):
+            if not isinstance(row, dict):
+                continue
+            key = row.get('id') if row.get('id') is not None else (
+                (row.get('primaryEmail'), row.get('paymentPerson'), row.get('server'))
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(row)
+
+        options = []
+        used_values = set()
+        for row in rows:
+            email = (row.get('primaryEmail') or '').strip()
+            discord_name = (row.get('primaryDiscord') or '').strip() or 'N/A'
+            status = (row.get('status') or '').strip()
+            payment_person = (row.get('paymentPerson') or '').strip()
+            server = (row.get('server') or '').strip()
+
+            label = f"{email} - {discord_name} - {status} - {payment_person}"
+
+            # Unique, stable value: prefer "id:123". If no id, fallback to a composite key.
+            base_value = f"id:{row['id']}" if row.get('id') is not None else f"{email}|{payment_person}|{server}"
+            value = base_value
+            idx = 1
+            while value in used_values:
+                idx += 1
+                value = f"{base_value}#{idx}"
+            used_values.add(value)
+
+            options.append(discord.SelectOption(label=label[:100], value=value))
+
+        # Limit (Discord max is 25; you were using single select)
+        options = options[:25] or [discord.SelectOption(label="(no users found)", value="__none__")]
         super().__init__(placeholder="Please select the user", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
-        # Ack, but do not modify text; we'll overwrite with the preview once ready
         try:
             if not interaction.response.is_done():
                 await interaction.response.defer_update()
         except Exception:
             pass
 
-        picked_email = self.values[0]
-        await self.view.render_confirmation(interaction, picked_email, self.information)
+        picked_key = self.values[0]
+        if picked_key == "__none__":
+            await self.view._edit_same_message(interaction, content="No users available to select.", view=None)
+            return
+
+        # Hand off the selected key (works with "id:123" because find_user supports it)
+        await self.view.render_confirmation(interaction, picked_key, self.information)
 
 class UpdateSelectorView(View):
     def __init__(self, search_results, information):
@@ -1083,14 +1114,11 @@ class ConfirmButtonsNewUser(View):
         except Exception:
             pass
 
-class ConfirmButtonsMoveUser(View):
-    def __init__(self, information):
-        super().__init__(timeout=180.0)
-        self.information = information
 
-        import asyncio
-        self._processing = False
-        self._lock = asyncio.Lock()
+class ConfirmButtonsMoveUser(View):
+    def __init__(self, information: dict):
+        super().__init__()
+        self.information = information
 
         ok = Button(style=discord.ButtonStyle.primary, label="Correct")
         ok.callback = self.correct_callback
@@ -1101,114 +1129,133 @@ class ConfirmButtonsMoveUser(View):
         self.add_item(cancel)
 
     async def correct_callback(self, interaction: discord.Interaction):
-        # Ack immediately
         try:
             if not interaction.response.is_done():
                 await interaction.response.defer_update()
         except Exception:
             pass
 
-        # Idempotency
-        if self._processing or self.information.get('_move_done'):
-            return
-        if self._lock.locked():
-            return
-        async with self._lock:
-            if self._processing or self.information.get('_move_done'):
-                return
-            self._processing = True
-            self.information['_move_done'] = True
+        info = self.information
+        email       = (info.get('primaryEmail') or '').strip()
+        old_server  = info.get('old_server')
+        new_server  = info.get('server')
+        old_4k      = (info.get('old_4k') or "No")
+        new_4k      = (info.get('4k') or "No")
+        user_id     = info.get('id')
+        discord_uid = info.get('primaryDiscordId')
 
-            # Disable buttons
-            try:
-                for child in self.children:
+        errors = []
+
+        # --- NEW server invite/update (use Section objects) ---
+        try:
+            new_cfg  = (config.get(f"PLEX-{new_server}", {}) or {})
+            base_url = new_cfg.get('baseUrl'); token = new_cfg.get('token')
+            std_libs = new_cfg.get('standardLibraries', []) or []
+            opt_libs = new_cfg.get('optionalLibraries', []) or []
+            desired_names = (std_libs + opt_libs) if new_4k == "Yes" else std_libs
+
+            plex_new = PlexServer(base_url, token)
+
+            def as_sections(plex, names):
+                objs = []
+                for n in names:
                     try:
-                        child.disabled = True
-                    except Exception:
-                        pass
-                if getattr(interaction, "message", None):
-                    await interaction.message.edit(view=self)
-            except Exception:
-                try:
-                    if getattr(interaction, "message", None):
-                        await interaction.message.edit(view=None)
-                except Exception:
-                    pass
-
-            followup_message = ""
-            new_server = self.information.get('server')
-            new_4k = self.information.get('4k')
-            email = self.information.get('primaryEmail')
-
-            std_libs = (config.get(f"PLEX-{new_server}", {}) or {}).get('standardLibraries') or []
-            opt_libs = (config.get(f"PLEX-{new_server}", {}) or {}).get('optionalLibraries') or []
-            section_names = (std_libs + opt_libs) if (self.information.get('4k') == "Yes") else std_libs
-            _old_srv = self.information.get('old_server')
-
-            plex_config = (config.get(f'PLEX-{new_server}', {}) or {})
-            base_url = plex_config.get('baseUrl')
-            token = plex_config.get('token')
-            if not base_url or not token:
-                logging.error(f"No/invalid configuration for Plex server '{new_server}'")
-            else:
-                try:
-                    plex = PlexServer(base_url, token)
-                    # Step 1: remove old shares on old server
-                    try:
-                        if _old_srv and _old_srv != new_server:
-                            old_cfg = (config.get(f"PLEX-{_old_srv}", {}) or {})
-                            old_base = old_cfg.get('baseUrl'); old_tok = old_cfg.get('token')
-                            if old_base and old_tok:
-                                old_plex = PlexServer(old_base, old_tok)
-                                plex.myPlexAccount().updateFriend(user=email, server=old_plex, removeSections=True)
-                            else:
-                                logging.warning(f"Old server '{_old_srv}' missing baseUrl/token; cannot remove old shares.")
+                        objs.append(plex.library.section(n))
                     except Exception as e:
-                        logging.error(f"Error removing old shares for {email} on '{__old_srv}': {e}")
+                        logging.warning(f"[move] section '{n}' not found on {new_server}: {e}")
+                return objs or names
 
-                    # Step 2: share on new server
-                    try:
-                        # Resolve LibrarySection objects from NEW server
-                        new_section_objs = []
-                        for name in section_names or []:
-                            try:
-                                new_section_objs.append(plex.library.section(name))
-                            except Exception as e:
-                                logging.warning(f"Library section '{name}' not found on {new_server}: {e}")
-                        plex.myPlexAccount().inviteFriend(user=email, server=plex, sections=new_section_objs or section_names)
-                        logging.info(f"User '{email}' shared to Plex server '{new_server}'")
-                    except Exception as e:
-                        logging.error(f"Error sharing user {email} to {new_server}: {e}")
-                except Exception as e:
-                    logging.error(f"Error authenticating to Plex at {base_url}: {e}")
-
+            sections = as_sections(plex_new, desired_names)
             try:
-                dbFunctions.update_database(self.information.get('id'), "server", new_server)
-                dbFunctions.update_database(self.information.get('id'), "4k", new_4k)
-                try:
-                    info = dict(self.information)
-                    info.setdefault('what', 'move')
-                    if info.get('paidAmount') is None:
-                        info['paidAmount'] = 0.0
-                    dbFunctions.log_transaction(information=info)
-                except Exception as e:
-                    logging.info(f"log_transaction skipped due to internal error: {e}")
+                plex_new.myPlexAccount().inviteFriend(
+                    user=email, server=plex_new, sections=sections, allowSync=True
+                )
+                logging.info(f"[move] invited {email} to {new_server} with {desired_names}")
             except Exception as e:
-                logging.error(f"DB update/log failed in move flow: {e}")
+                if "already sharing" in str(e).lower():
+                    plex_new.myPlexAccount().updateFriend(
+                        user=email, server=plex_new, sections=sections, allowSync=True
+                    )
+                    logging.info(f"[move] updated libraries for {email} on {new_server}")
+                else:
+                    errors.append(f"Invite failed on {new_server}")
+                    logging.error(f"[move] invite to {new_server} failed: {e}")
+        except Exception as e:
+            errors.append(f"Plex auth failed for {new_server}")
+            logging.error(f"[move] auth to {new_server} failed: {e}")
 
-            followup_message += (
-                "---------------------\n"
-                f"Email: {self.information.get('primaryEmail')}\n"
-                f"Old Server: {self.information.get('old_server')}\n"
-                f"Old 4k: {self.information.get('old_4k')}\n"
-                "---------------------\n"
-                f"Server: {self.information.get('server')}\n"
-                f"4k: {self.information.get('4k')}\n"
-                f"Paid Amount: {self.information.get('paidAmount')}\n"
-                f"End Date: {self.information.get('endDate')}\n"
-            )
+        if old_server and old_server != new_server:
+            old_cfg  = (config.get(f"PLEX-{old_server}", {}) or {})
+            old_url  = old_cfg.get('baseUrl'); old_tok = old_cfg.get('token')
+            old_plex = PlexServer(old_url, old_tok)
 
-            await _edit_same_message(interaction, content=followup_message, view=None)
+            try:
+                removed = old_plex.myPlexAccount().removeFriend(email)
+                if removed:
+                    logging.info("User '%s' has been successfully removed from Plex server '%s'", email, old_plex)
+                else:
+                    logging.warning("Friendship with '%s' not found and thus not removed.", email)
+            except Exception as e:
+                logging.warning("Error removing friendship for '%s' on '%s': %s", email, old_plex, e)
+
+        # --- Discord role (best-effort) ---
+        try:
+            new_role = (config.get(f"PLEX-{new_server}", {}) or {}).get('role')
+            if discord_uid and new_role:
+                await add_role(discord_uid, new_role)
+        except Exception as e:
+            logging.warning(f"[move] discord role update warning: {e}")
+
+        # --- DB updates + log ---
+        try:
+            if user_id is not None:
+                if old_server != new_server:
+                    dbFunctions.update_database(user_id, "server", new_server)
+                if old_4k != new_4k:
+                    dbFunctions.update_database(user_id, "4k", new_4k)
+            info_out = dict(info); info_out['desc'] = 'move'
+            if info_out.get('paidAmount') is None:
+                info_out['paidAmount'] = 0.0
+            dbFunctions.log_transaction(information=info_out)
+        except Exception as e:
+            errors.append("DB update/log failed")
+            logging.error(f"[move] DB/log failed: {e}")
+
+        # --- Notify (best-effort) ---
+        try:
+            subject = (config.get("discord", {}) or {}).get('moveSubject')
+            body_tmpl = (config.get("discord", {}) or {}).get('moveBody')
+            if subject and body_tmpl:
+                body = body_tmpl.format(primaryEmail=email, server=new_server, section_names=desired_names)
+                if discord_uid:
+                    await send_discord_message(to_user=discord_uid, subject=subject, body=body)
+                emailFunctions.send_email(config_location, subject, body, email)
+        except Exception as e:
+            logging.warning(f"[move] notification warn: {e}")
+
+        # Summary
+        summary = (
+            "---------------------\n"
+            f"Email: {email}\n"
+            f"Old Server: {old_server}\n"
+            f"Old 4k: {old_4k}\n"
+            "---------------------\n"
+            f"New Server: {new_server}\n"
+            f"New 4k: {new_4k}\n"
+            f"Paid Amount: {info.get('paidAmount')}\n"
+            f"End Date: {info.get('endDate')}\n"
+            f"{'Issues: ' + ', '.join(errors) if errors else 'All steps completed.'}\n"
+        )
+        try:
+            if interaction.message:
+                await interaction.message.edit(content=summary, view=None)
+            else:
+                await interaction.response.edit_message(content=summary, view=None)
+        except Exception:
+            try:
+                await interaction.followup.send(summary, ephemeral=True)
+            except Exception:
+                pass
 
     async def cancel_callback(self, interaction: discord.Interaction):
         try:
@@ -1216,7 +1263,13 @@ class ConfirmButtonsMoveUser(View):
                 await interaction.response.defer_update()
         except Exception:
             pass
-        await _edit_same_message(interaction, content="Cancelled the request.", view=None)
+        try:
+            if interaction.message:
+                await interaction.message.edit(content="Cancelled the request.", view=None)
+            else:
+                await interaction.response.edit_message(content="Cancelled the request.", view=None)
+        except Exception:
+            pass
 
 
 # ======================================================================
