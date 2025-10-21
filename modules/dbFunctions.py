@@ -47,10 +47,10 @@ def create_user(information):
 
         # SQL query to insert a new user into the database
         insert_query = """
-        INSERT INTO users (primaryEmail, primaryDiscord, primaryDiscordId, paymentMethod, paymentPerson, paidAmount, server, 4k, status, joinDate, startDate, endDate)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO users (primaryEmail, primaryDiscord, primaryDiscordId, paymentMethod, paymentPerson, paidAmount, server, 4k, status, joinDate, startDate, endDate, notifyDiscord, notifyEmail)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
-        cursor.execute(insert_query, (primary_email, primary_discord, primary_discord_id, payment_method, payment_person, paid_amount, server, is_4k, status, join_date, start_date, end_date))
+        cursor.execute(insert_query, (primary_email, primary_discord, primary_discord_id, payment_method, payment_person, paid_amount, server, is_4k, status, join_date, start_date, end_date, 'Primary', 'Primary'))
 
         # Commit the changes
         connection.commit()
