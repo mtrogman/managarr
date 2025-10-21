@@ -1,4 +1,4 @@
-import sys, logging, discord, os
+import sys, logging, discord, os, re
 from plexapi.myplex import MyPlexAccount
 from discord import app_commands
 from discord.ext import commands
@@ -189,9 +189,115 @@ async def payment_received(ctx, *, user: str, amount: float):
         ephemeral=True,
     )
 
-@bot.tree.command(name="add_new_user", description="Add new user to DB (first purchase promos + optional referrer).")
-async def add_new_user(ctx: discord.Interaction):
-    await ctx.response.send_modal(AddNewUserModal(ctx))
+
+@bot.tree.command(name="add_new_user", description="Add new user without a popup (argument-driven).")
+@app_commands.describe(
+    email="Primary email for the user",
+    amount="Amount paid (USD)",
+    payment_person="Name shown on the payment",
+    discord_user="Start typing to search members; pick a result or choose (skip)"
+)
+async def add_new_user(ctx: discord.Interaction, *, email: str, amount: float, payment_person: str, discord_user: str = ""):
+    await ctx.response.defer(ephemeral=True)
+
+    information = {
+        "what": "newuser",
+        "primaryEmail": email.strip(),
+        "paidAmount": float(amount),
+        "paymentPerson": payment_person.strip()
+    }
+
+    # Optional Discord user -> prefer guild display/global/name; store ID
+    picked_tag = None
+    picked_id = None
+    val = (discord_user or "").strip()
+    if val and val.lower() not in ("skip", "(skip)", "none", "n/a", "na"):
+        snowflake = None
+        mention = re.match(r"<@!?(\d{5,25})>", val)
+        if mention:
+            snowflake = mention.group(1)
+        elif val.isdigit():
+            snowflake = val
+
+        async def _best_display_from_id(user_id: int):
+            member_name = None
+            try:
+                if ctx.guild:
+                    mem = ctx.guild.get_member(user_id) or await ctx.guild.fetch_member(user_id)
+                    if mem:
+                        member_name = getattr(mem, "display_name", None) or getattr(mem, "global_name", None)
+            except Exception:
+                pass
+            user_name = None
+            try:
+                usr = await bot.fetch_user(user_id)
+                if usr:
+                    user_name = getattr(usr, "global_name", None) or getattr(usr, "name", None)
+            except Exception:
+                pass
+            return member_name or user_name
+
+        if snowflake:
+            try:
+                display = await _best_display_from_id(int(snowflake))
+            except Exception:
+                display = None
+            picked_id = str(snowflake)
+            picked_tag = display or f"ID {snowflake}"
+        else:
+            picked_tag = val  # free text
+
+    if picked_tag:
+        information["primaryDiscord"] = picked_tag
+    if picked_id:
+        information["primaryDiscordId"] = picked_id
+
+    # Kick off your existing wizard (no modal)
+    view = discordFunctions.DiscordUserView(information, ctx, picked_tag or "")
+    await view.start()
+
+# ---- Autocomplete for discord_user ----
+async def _search_guild_members_for_autocomplete(interaction: discord.Interaction, query: str):
+    try:
+        guild = interaction.guild
+        members = []
+        if guild:
+            try:
+                q = (query or "").lower()
+                for m in guild.members:
+                    name = (getattr(m, "name", "") or "").lower()
+                    disp = (getattr(m, "display_name", "") or "").lower()
+                    glob = (getattr(m, "global_name", "") or "").lower()
+                    if q in name or q in disp or q in glob:
+                        members.append(m)
+            except Exception:
+                members = []
+            if not members and (query or "").isdigit():
+                try:
+                    m2 = await guild.fetch_member(int(query))
+                    if m2:
+                        members = [m2]
+                except Exception:
+                    pass
+        return members[:20]
+    except Exception:
+        return []
+
+@add_new_user.autocomplete('discord_user')
+async def _add_new_user_discord_autocomplete(interaction: discord.Interaction, current: str):
+    # visible optional field; show a skip first
+    choices = [app_commands.Choice(name="(skip)", value="skip")]
+    members = await _search_guild_members_for_autocomplete(interaction, current or "")
+    for m in members:
+        try:
+            display = m.display_name or m.global_name or m.name
+        except Exception:
+            display = m.name
+        label = f"{display} (@{m.name})"
+        choices.append(app_commands.Choice(name=label[:100], value=str(m.id)))
+        if len(choices) >= 20:
+            break
+    return choices
 
 @bot.tree.command(name="move_user", description="Update user's plex libraries")
 @app_commands.describe(user="User identifier (Discord user, email address, or paymentPerson)", amount="Payment amount (float, optional)")
